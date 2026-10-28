@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seoul Flood Probability Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
+</head>
+<body>
+  <div id="loading">Loading data…</div>
+
+  <aside id="controls">
+    <header>
+      <h1>Seoul Flood Probability Map</h1>
+      <p class="sub">If this rain came, how likely is this cell to flood?</p>
+    </header>
+
+    <section>
+      <h2>Place search</h2>
+      <form id="search-form" autocomplete="off">
+        <input id="search-input" type="search" placeholder="Address or place name">
+        <button type="submit">Search</button>
+      </form>
+      <p id="search-msg" class="msg"></p>
+      <ul id="search-results"></ul>
+    </section>
+
+    <section>
+      <h2>Rainfall pattern</h2>
+      <div id="presets" class="presets"></div>
+      <div id="sliders"></div>
+      <p id="pattern-warn" class="warn" hidden></p>
+      <button id="calc-btn" class="primary">Calculate flood probability</button>
+      <p id="calc-status" class="msg"></p>
+    </section>
+  </aside>
+
+  <main id="map-wrap">
+    <div id="map"></div>
+  </main>
+
+  <aside id="detail" hidden>
+    <button id="detail-close" class="close" title="Clear place">×</button>
+    <div id="detail-body"></div>
+  </aside>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

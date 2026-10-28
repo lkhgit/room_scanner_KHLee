@@ -1,0 +1,19 @@
+# Room Scanner settings. Paths are relative to this folder unless absolute.
+# API keys for the weather service and geocoder currently live in the existing
+# "mold scanner/kma.py"; they are read from there and never copied here.
+paths:
+  sunlight_dir: "../sunlight scanner"
+  mold_dir: "../mold scanner"
+  flood_dir: "../flood-app"
+  kma_cache: "../mold scanner/data/kma_cache"
+mold:
+  sim_year: null          # null = last completed calendar year
+  ground_depthㅇ_m: 1.0
+sun:
+  step_min: 10
+  grid_m: 0.15
+  default_dates: ["season"]   # "season" = solstices and equinoxes
+server:
+  host: "127.0.0.1"
+  port: 8000
+# Flood-tab place search uses KAKAO_REST_KEY in "mold scanner/kma.py" through the server (no JavaScript key needed).

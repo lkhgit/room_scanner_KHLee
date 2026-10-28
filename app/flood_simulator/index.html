@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>서울 침수 확률 지도</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.11.0/proj4.js"></script>
+  <script src="config.js"></script>
+</head>
+<body>
+  <div id="loading">데이터를 불러오는 중…</div>
+
+  <aside id="controls">
+    <header>
+      <h1>서울 침수 확률 지도</h1>
+      <p class="sub">이런 비가 온다면, 이 격자가 잠길 확률은?</p>
+    </header>
+
+    <section>
+      <h2>장소 검색</h2>
+      <form id="search-form" autocomplete="off">
+        <input id="search-input" type="search" placeholder="주소 또는 장소 이름">
+        <button type="submit">검색</button>
+      </form>
+      <p id="search-msg" class="msg"></p>
+      <ul id="search-results"></ul>
+    </section>
+
+    <section>
+      <h2>강우 양상</h2>
+      <div id="presets" class="presets"></div>
+      <div id="sliders"></div>
+      <p id="pattern-warn" class="warn" hidden></p>
+      <button id="calc-btn" class="primary">침수 확률 계산</button>
+      <p id="calc-status" class="msg"></p>
+    </section>
+  </aside>
+
+  <main id="map-wrap">
+    <div id="map"></div>
+  </main>
+
+  <aside id="detail" hidden>
+    <button id="detail-close" class="close" title="장소 지우기">×</button>
+    <div id="detail-body"></div>
+  </aside>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

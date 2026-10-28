@@ -1,0 +1,53 @@
+# mold_simulator.py 설정 예시 (원 명세 §7, 수정 명세 §6.1). config.yaml로 복사해 세션 폴더나 이 폴더에 둔다.
+# 빠진 항목은 기본값을 쓴다. 인증키는 여기가 아니라 kma.py에 적는다.
+
+# station_id: 108            # ASOS 관측소 (서울 108). 빼면 session.yaml의 asos_station,
+                             # 그것도 없으면 장소에서 가장 가까운 관측소(지중온도 있는 곳)를 쓴다
+                             # 장소 이름만 있으면 카카오 로컬 API로 좌표를 찾는다
+ground_depth_m: 1.0          # 지중온도 깊이: 0.5, 1.0, 1.5, 3.0, 5.0
+
+# 시뮬레이션 기상 기간
+period: year                 # year: 연도별 / last365: 어제 23시로 끝나는 직전 365일
+# sim_years: [2025]          # year 모드의 연도. 빼면 직전 완결 연도. 끝나지 않은 연도는 거부
+
+# 냉난방 일정 - 기본값은 임의 예시이므로 실제 생활에 맞게 고친다
+heating_months: [11, 12, 1, 2, 3]
+cooling_months: [6, 7, 8, 9]
+hvac_hours: ["18-23", "0-7"] # 시 목록 또는 "a-b" 범위
+T_heat_set: 20.0             # °C
+T_cool_set: 26.0             # °C
+
+# 측정 시점 외기·지중온도
+outdoor_source: auto         # auto(ASOS 우선, 없으면 초단기실황) | asos | ncst
+ground_lag_max_days: 3       # 측정일 지중온도가 없을 때 며칠 전 값까지 대신 쓸지
+
+# 실내 습기 부하 (A1)
+T_low: 0.0                   # g 함수 꺾임점 °C
+T_high: 20.0
+round_to_class: true         # "측정" 판정일 때 dv_max를 {0,2,4,6,8,10} g/m3 중 가까운 값으로
+g_min: 0.3
+dv_max_override: null        # g/m3. 지정하면 측정값 대신 사용 (두 시나리오 모두)
+
+# 온도 인자 f
+f_override: {}               # 예: {3: 0.62, 12: 0.8}
+sd_max: 0.3                  # °C. IR 표준편차가 이보다 크면 그 면·스캔 제외
+
+# 불확도와 판정 (수정 명세 §4). 계산할 수 있으면 sigma와 관계없이 측정값을 쓴다
+# 보수 시나리오는 f - 2 sigma_f, dv_max + 2 sigma (최대 10 g/m3)
+sigma_ir: 0.5                # °C. IR 계통 오차. sensor_test.ino로 보정했으면 보정 후 RMSE로 낮춘다
+sigma_sht: 0.2               # °C. SHT41 온도 오차
+sigma_site: 0.3              # °C. 관측소와 측정 장소의 지중온도 차
+sigma_rh_in: 1.8             # %. SHT41 습도 오차
+sigma_rh_out: 5.0            # %. 외기 습도 오차 (격자·관측소 차이 포함 추정)
+sigma_beh: 1.0               # g/m3. 요리·샤워 등 생활 습기의 순간 변동
+sigma_f_max: 0.10            # 판정 표시 기준. 넘으면 "uncertain"으로 표시만 하고 측정값을 그대로 쓴다
+sigma_dv_max: 1.0            # g/m3. 판정 표시 기준 (위와 같음)
+f_central: 0.75              # f 대체값 (중앙 / 보수) - 그 면의 f를 계산할 수 없을 때만 쓴다
+f_low: 0.60
+dv_central: 4.0              # dv_max 대체값 g/m3 (중앙 / 보수) - 외기 자료가 없거나 g가 모두 0일 때만 쓴다
+dv_high: 6.0
+
+# VTT
+material_class: sensitive    # very_sensitive | sensitive | medium_resistant | resistant
+material_by_face: {}         # 예: {12: medium_resistant}. session.yaml의 by_face가 우선
+C_mat: 0.5                   # 감소 계수: 1.0, 0.5, 0.25, 0.1

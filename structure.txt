@@ -1,0 +1,25 @@
+room-scanner/
+├── README.md               ← 데모 영상 · 한 줄 소개 · 완료/진행 중 · 실행 방법
+├── requirements.txt
+├── .gitignore
+├── app/                    ← maker final (햇빛 + 침수 + 곰팡이 통합 앱)
+│   ├── README.md           ← 실행법, 샘플 데이터로 하드웨어 없이 돌리는 법
+│   └── sample_data/
+├── flood-risk/             ← 침수 위험 모델 (학습 → 예측 → 출력)
+│   └── README.md           ← 데이터 출처, 학습 방법, 결과
+├── hardware/
+│   ├── README.md           ← 부품 목록, 배선, 라벨 붙인 사진
+│   ├── firmware/           ← 아두이노(.ino) 코드
+│   ├── calibration/        ← bno055 나침반
+│   └── cad/                ← .3mf 출력 파일
+├── experiments/            ← 시행착오 기록
+│   ├── README.md           ← 단계별 한눈 요약표
+│   ├── 01_motor/
+│   ├── 02_sensors/
+│   ├── 03_capture/
+│   ├── 04_panorama/
+│   ├── 05_horizonnet_3d/
+│   └── 06_window_detection/
+└── docs/
+    ├── build-log.md        ← 제작 과정 서술
+    └── images/             ← 선별한 결과·과정 사진

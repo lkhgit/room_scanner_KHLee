@@ -1,0 +1,8 @@
+flask>=3.0
+pyyaml
+pandas
+numpy
+scipy
+pyserial
+requests
+opencv-python
