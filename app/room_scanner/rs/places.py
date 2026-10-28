@@ -23,13 +23,14 @@ def _get(url, params):
     kma = _kma()
     key = kma.KAKAO_REST_KEY.strip()
     if not key:
-        raise PlaceError("No Kakao REST key in ../mold scanner/kma.py. You can still click the map to pick a cell.")
+        raise PlaceError("Kakao REST key is EMPTY - enter it in app/mold_scanner/kma.py (KAKAO_REST_KEY). "
+                         "You can still click the map to pick a cell.")
     try:
         r = requests.get(url, params=params, timeout=15, headers={"Authorization": f"KakaoAK {key}"})
     except requests.RequestException as e:
         raise PlaceError(f"Could not reach the Kakao place search: {e}")
     if r.status_code in (401, 403):
-        raise PlaceError("The Kakao REST key was rejected. Check the key in ../mold scanner/kma.py.")
+        raise PlaceError("The Kakao REST key was rejected. Check KAKAO_REST_KEY in app/mold_scanner/kma.py.")
     if not r.ok:
         raise PlaceError(f"The Kakao place search failed ({r.status_code}).")
     return r.json().get("documents") or []

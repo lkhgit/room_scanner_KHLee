@@ -25,7 +25,7 @@ SEOUL_CENTER = [37.5665, 126.9780]
 # 서울 대략 bbox: 검색 결과를 서울 인근으로 편향(강제 필터는 아님)
 SEOUL_VIEWBOX = "126.734,37.715,127.269,37.413"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-NOMINATIM_USER_AGENT = "SeoulFloodHeatmap/1.0 (lkh080108@gmail.com)"
+NOMINATIM_USER_AGENT = "SeoulFloodHeatmap/1.0 (https://github.com/lkhgit/room_scanner_KHLee)"
 NOMINATIM_MIN_INTERVAL_SEC = 1.1  # Nominatim 사용 정책(초당 1건) 준수
 
 app = Flask(__name__)

@@ -20,10 +20,14 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import yaml
 
-# ---------------------------------------------------------------- 인증키
-# 이 파일을 다른 사람에게 줄 때는 키를 지우고 줄 것
-KMA_SERVICE_KEY = "sPmc/m2JcuMYosHKGMxKbtu54xQpgoJyAELQcsrfDgo89ZEalq+bKLmE1jMFnarJzY5u8OkLeDY0Of/TSwOWWg=="     # 공공데이터포털 일반 인증키 (Decoding 키, Encoding 키 모두 가능)
-KAKAO_REST_KEY = "426fd4cca1d583baf2a45b9a6975c2f9"      # 카카오 REST API 키 (장소 이름으로 좌표를 찾을 때만 필요)
+# ============================ API KEYS REQUIRED ============================
+# !! The API keys below are intentionally EMPTY. Enter your own keys here !!
+# Never commit real keys to git.
+#   KMA_SERVICE_KEY : data.go.kr (Korea Meteorological Administration) service key
+#   KAKAO_REST_KEY  : Kakao Developers REST API key (only needed for place-name search)
+KMA_SERVICE_KEY = ""   # <-- ENTER your data.go.kr service key here
+KAKAO_REST_KEY = ""    # <-- ENTER your Kakao REST API key here
+# ===========================================================================
 
 KST = ZoneInfo("Asia/Seoul")
 HERE = Path(__file__).parent
@@ -35,7 +39,8 @@ STATION_CSV = next((HERE / n for n in STATION_CSV_NAMES if (HERE / n).exists()),
 def service_key() -> str:
     key = KMA_SERVICE_KEY.strip()
     if not key:
-        raise RuntimeError("KMA_SERVICE_KEY가 비어 있음 - kma.py에 공공데이터포털 인증키를 적을 것")
+        raise RuntimeError("!!! KMA_SERVICE_KEY is EMPTY - enter your data.go.kr service key in "
+                           "app/mold_scanner/kma.py !!!")
     return unquote(key) if "%" in key else key   # Encoding 키를 넣어도 이중 인코딩되지 않게
 
 
@@ -221,8 +226,8 @@ def _kakao_search(url: str, query: str):
     import requests
     key = KAKAO_REST_KEY.strip()
     if not key:
-        raise RuntimeError("KAKAO_REST_KEY가 비어 있음 - 장소 이름으로 좌표를 찾으려면 kma.py에 카카오 REST 키를 "
-                           "적을 것 (또는 session.yaml에 site.lat/lon을 직접 적을 것)")
+        raise RuntimeError("!!! KAKAO_REST_KEY is EMPTY - enter your Kakao REST API key in app/mold_scanner/kma.py "
+                           "(or set site.lat/lon directly in session.yaml) !!!")
     r = requests.get(url, params={"query": query, "size": 1}, timeout=30,
                      headers={"Authorization": f"KakaoAK {key}"})
     if r.status_code in (401, 403):

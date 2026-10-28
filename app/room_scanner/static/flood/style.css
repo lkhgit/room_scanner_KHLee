@@ -75,6 +75,7 @@ h3 { font-size: 12px; margin: 0 0 4px; color: var(--muted); font-weight: 600; di
   width: 100%; padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600;
 }
 .primary.pulse { box-shadow: 0 0 0 3px var(--accent-soft); }
+#calc-status { margin: 6px 0 16px; }
 
 /* ---- 지도 */
 #map-wrap { position: relative; min-width: 0; }
