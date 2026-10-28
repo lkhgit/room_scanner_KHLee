@@ -14,7 +14,7 @@
 강우 시나리오(연간 확률 평균)에는 PC가 있는 모든 연도(2010~2026)를 쓴다.
 
 실행:
-    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "예측 모델.py"
+    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "cluster-level prediction.py"
 """
 import importlib.util
 import os
@@ -28,10 +28,10 @@ import pytensor.tensor as pt
 from scipy.special import expit
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-GRID_PATH = os.path.join(BASE_DIR, "격자 클러스터링 결과", "grid_clusters.csv")
-PC_PATH = os.path.join(BASE_DIR, "최종 강우량 데이터.csv")
-CLUSTERING_PATH = os.path.join(BASE_DIR, "필지 클러스터링.py")
-OUT_DIR = os.path.join(BASE_DIR, "예측 모델 결과")
+GRID_PATH = os.path.join(BASE_DIR, "Grid clustering results", "grid_clusters.csv")
+PC_PATH = os.path.join(BASE_DIR, "rainfall data final ver.csv")
+CLUSTERING_PATH = os.path.join(BASE_DIR, "grid clustering.py")
+OUT_DIR = os.path.join(BASE_DIR, "Prediction model results")
 
 NO_DATA_YEARS = [2015, 2021]  # 침수흔적도 자료 없음
 TRAIN_YEARS = [y for y in range(2010, 2026) if y not in NO_DATA_YEARS]
@@ -51,7 +51,7 @@ RELIABILITY_BINS = [0, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0]
 
 
 def load_clustering_module():
-    """'필지 클러스터링.py'의 cluster_cells를 교차검증 재클러스터링에 쓴다."""
+    """'grid clustering.py'의 cluster_cells를 교차검증 재클러스터링에 쓴다."""
     spec = importlib.util.spec_from_file_location("grid_clustering", CLUSTERING_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

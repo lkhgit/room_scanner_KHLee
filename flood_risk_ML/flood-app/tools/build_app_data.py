@@ -2,12 +2,12 @@
 침수 확률 지도 앱(flood-app)이 읽을 JSON을 분석 결과 파일에서 만든다.
 
 입력 (침수 위험/)
-  격자 예측 결과/grid_flood_risk.csv     격자별 q_g, 연간·2년·4년 확률
-  격자 예측 결과/scenario_params.json    사후 표본 α, β와 PC 표준화 값
-  격자 클러스터링 결과/grid_clusters.csv  격자별 침수 연도 조합, 클러스터 배정 방식
-  격자 클러스터링 결과/cluster_summary.csv
-  강우 권역화 결과/region_year_features_k5.csv, region_assignment.csv
-  예측 모델 결과/cv_results.csv
+  Grid-level prediction results/grid_flood_risk.csv     격자별 q_g, 연간·2년·4년 확률
+  Grid-level prediction results/scenario_params.json    사후 표본 α, β와 PC 표준화 값
+  Grid clustering results/grid_clusters.csv  격자별 침수 연도 조합, 클러스터 배정 방식
+  Grid clustering results/cluster_summary.csv
+  Rainfall zonation results/region_year_features_k5.csv, region_assignment.csv
+  Prediction model results/cv_results.csv
   data/station_coords.csv, data/seoul_gu.geojson   (fetch_geo.py로 내려받음)
 
 출력 (flood-app/data/)
@@ -23,7 +23,7 @@
 
 검산
   1. model.json으로 연간 확률을 다시 계산해 grid_flood_risk.csv의 p_annual과 비교
-  2. years.json의 PC를 '최종 강우량 데이터.csv'와 비교
+  2. years.json의 PC를 'rainfall data final ver.csv'와 비교
   3. 격자 중심 → WGS84 → EPSG:5179 왕복 후 격자 찾기 식이 자기 ix, iy를 돌려주는지
 
 실행:
@@ -41,14 +41,14 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BASE_DIR = os.path.dirname(APP_DIR)
 OUT_DIR = os.path.join(APP_DIR, "data")
 
-RISK_PATH = os.path.join(BASE_DIR, "격자 예측 결과", "grid_flood_risk.csv")
-PARAMS_PATH = os.path.join(BASE_DIR, "격자 예측 결과", "scenario_params.json")
-CLUSTERS_PATH = os.path.join(BASE_DIR, "격자 클러스터링 결과", "grid_clusters.csv")
-CLUSTER_SUMMARY_PATH = os.path.join(BASE_DIR, "격자 클러스터링 결과", "cluster_summary.csv")
-REGION_FEATURES_PATH = os.path.join(BASE_DIR, "강우 권역화 결과", "region_year_features_k5.csv")
-REGION_ASSIGN_PATH = os.path.join(BASE_DIR, "강우 권역화 결과", "region_assignment.csv")
-FINAL_PC_PATH = os.path.join(BASE_DIR, "최종 강우량 데이터.csv")
-CV_PATH = os.path.join(BASE_DIR, "예측 모델 결과", "cv_results.csv")
+RISK_PATH = os.path.join(BASE_DIR, "Grid-level prediction results", "grid_flood_risk.csv")
+PARAMS_PATH = os.path.join(BASE_DIR, "Grid-level prediction results", "scenario_params.json")
+CLUSTERS_PATH = os.path.join(BASE_DIR, "Grid clustering results", "grid_clusters.csv")
+CLUSTER_SUMMARY_PATH = os.path.join(BASE_DIR, "Grid clustering results", "cluster_summary.csv")
+REGION_FEATURES_PATH = os.path.join(BASE_DIR, "Rainfall zonation results", "region_year_features_k5.csv")
+REGION_ASSIGN_PATH = os.path.join(BASE_DIR, "Rainfall zonation results", "region_assignment.csv")
+FINAL_PC_PATH = os.path.join(BASE_DIR, "rainfall data final ver.csv")
+CV_PATH = os.path.join(BASE_DIR, "Prediction model results", "cv_results.csv")
 STATION_PATH = os.path.join(BASE_DIR, "data", "station_coords.csv")
 SEOUL_GU_PATH = os.path.join(BASE_DIR, "data", "seoul_gu.geojson")
 
@@ -273,7 +273,7 @@ def main():
     print(f"  연간 확률 재계산 vs p_annual: 최대 차이 {diff:.1e} -> {'통과' if diff < 5e-4 else '실패'}")
     final = pd.read_csv(FINAL_PC_PATH, encoding="utf-8-sig").set_index("year")
     pc_diff = float((pc_table - final.loc[pc_table.index, pc_table.columns]).abs().max().max())
-    print(f"  연도별 PC vs 최종 강우량 데이터.csv: 최대 차이 {pc_diff:.1e} -> {'통과' if pc_diff < 1e-6 else '실패'}")
+    print(f"  연도별 PC vs rainfall data final ver.csv: 최대 차이 {pc_diff:.1e} -> {'통과' if pc_diff < 1e-6 else '실패'}")
     miss = check_grid_lookup(risk)
     print(f"  격자 찾기 왕복: 어긋난 격자 {miss}개 -> {'통과' if miss == 0 else '실패'}")
     if diff >= 5e-4 or pc_diff >= 1e-6 or miss:

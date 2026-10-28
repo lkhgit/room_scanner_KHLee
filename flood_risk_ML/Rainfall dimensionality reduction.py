@@ -6,7 +6,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CSV_PATH = os.path.join(BASE_DIR, "강우량 클러스터링된 데이터.csv")
+CSV_PATH = os.path.join(BASE_DIR, "rainfall clustered data.csv")
 
 # 데이터 로드: 각 행 = 연도, 각 열 = 권역별 강우 특징(max1h, max24h)
 df = pd.read_csv(CSV_PATH)
@@ -39,7 +39,7 @@ print(pca_df.round(3).to_string(index=False))
 
 # 4차원 결과 저장
 N_KEEP = 4
-OUT_CSV = os.path.join(BASE_DIR, "최종 강우량 데이터.csv")
+OUT_CSV = os.path.join(BASE_DIR, "rainfall data final ver.csv")
 OUT_TXT = os.path.join(BASE_DIR, "강우량 차원 축소 방법.txt")
 
 pca_df[["year"] + [f"PC{i + 1}" for i in range(N_KEEP)]].to_csv(OUT_CSV, index=False, encoding="utf-8-sig")
@@ -59,8 +59,8 @@ lines = [
     "=" * 40,
     "",
     "1. 개요",
-    f"- 원본: '강우량 클러스터링된 데이터.csv' ({X.shape[0]}개 연도 x {X.shape[1]}개 특징)",
-    f"- 결과: '최종 강우량 데이터.csv' (year, PC1~PC{N_KEEP})",
+    f"- 원본: 'rainfall clustered data.csv' ({X.shape[0]}개 연도 x {X.shape[1]}개 특징)",
+    f"- 결과: 'rainfall data final ver.csv' (year, PC1~PC{N_KEEP})",
     f"- {N_KEEP}차원 누적 설명 분산: {cumulative[N_KEEP - 1]:.4f}",
     "- 처리 순서: 표준화(StandardScaler) -> PCA 투영",
     "",

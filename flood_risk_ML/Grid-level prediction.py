@@ -1,5 +1,5 @@
 """
-클러스터 침수 모델(예측 모델 결과/posterior.nc)에 격자 비례상수 q_g를 곱해 격자별 침수 확률을 예측한다.
+클러스터 침수 모델(Prediction model results/posterior.nc)에 격자 비례상수 q_g를 곱해 격자별 침수 확률을 예측한다.
 
 1. 클러스터 모델: η_c = α_c + β_c · z,  σ(η_c) = 그해 클러스터가 잠기는 사건(침수 비율 50% 이상)의 확률
 2. 격자 비례상수: q_g = (k_g + m) / (k̄_c + m)
@@ -8,7 +8,7 @@
 3. 격자 침수 확률: 오즈_g = q_g × 오즈_c  ⇔  P_g = σ(η_c + log q_g)
 4. 불확실성: 사후 표본 500개 각각으로 3단계를 계산해 평균과 5–95% 분위수로 요약
 
-출력 (격자 예측 결과/)
+출력 (Grid-level prediction results/)
   grid_flood_risk.csv   격자별 q_g, 연간 확률, 거주 L년 확률 (L = 2, 4)
   q_summary.csv         클러스터별 q_g 분포 점검
   scenario_params.json  앱에서 슬라이더 z로 실시간 계산할 때 쓰는 사후 표본과 격자별 log q_g
@@ -17,7 +17,7 @@
 침수 이력이 있는 격자(grid_clusters.csv)만 계산한다. 나머지 격자는 '기록 없음'이다.
 
 실행:
-    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "격자 예측.py"
+    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "Grid-level prediction.py"
 """
 import importlib.util
 import json
@@ -30,13 +30,13 @@ import pandas as pd
 from scipy.special import expit, logit
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "예측 모델.py")
-CLUSTERING_PATH = os.path.join(BASE_DIR, "필지 클러스터링.py")
-MODEL_DIR = os.path.join(BASE_DIR, "예측 모델 결과")
+MODEL_PATH = os.path.join(BASE_DIR, "cluster-level prediction.py")
+CLUSTERING_PATH = os.path.join(BASE_DIR, "grid clustering.py")
+MODEL_DIR = os.path.join(BASE_DIR, "Prediction model results")
 POSTERIOR_PATH = os.path.join(MODEL_DIR, "posterior.nc")
 CLUSTER_RISK_PATH = os.path.join(MODEL_DIR, "cluster_annual_risk.csv")
 CV_PRED_PATH = os.path.join(MODEL_DIR, "cv_predictions.csv")
-OUT_DIR = os.path.join(BASE_DIR, "격자 예측 결과")
+OUT_DIR = os.path.join(BASE_DIR, "Grid-level prediction results")
 
 SHRINK_M = 2
 M_CANDIDATES = [1, 2, 4]

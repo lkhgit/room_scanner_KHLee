@@ -16,6 +16,7 @@ import pandas as pd
 from shapely.geometry import box
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.join(BASE_DIR, "flood map")
 OUT_PATH = os.path.join(BASE_DIR, "data", "flood_grid.geojson")
 SOURCE_CRS = "EPSG:5179"  # 중부원점 TM, 원본 shapefile 좌표계
 CELL_SIZE_M = 100  # 격자 한 변 길이(미터). 필요하면 조정.
@@ -24,11 +25,11 @@ CELL_SIZE_M = 100  # 격자 한 변 길이(미터). 필요하면 조정.
 def find_year_shapefiles():
     """연도 폴더(YYYY년 침수흔적도)를 순회하며 (year, shp_path) 목록을 반환."""
     pairs = []
-    for entry in sorted(os.listdir(BASE_DIR)):
+    for entry in sorted(os.listdir(SRC_DIR)):
         m = re.match(r"^(\d{4})년\s*침수흔적도$", entry)
         if not m:
             continue
-        folder = os.path.join(BASE_DIR, entry)
+        folder = os.path.join(SRC_DIR, entry)
         if not os.path.isdir(folder):
             continue
         shp_list = glob.glob(os.path.join(folder, "*.shp"))

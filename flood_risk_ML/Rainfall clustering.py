@@ -31,8 +31,8 @@ BASE = Path(__file__).resolve().parent
 # 설정값 (코드 안에 숫자를 직접 쓰지 않는다)
 # ──────────────────────────────────────────────
 CFG = {
-    "CSV_PATH": BASE / "합친 데이터" / "강우량_2009_2026.csv",
-    "OUT_DIR": BASE / "강우 권역화 결과",
+    "CSV_PATH": BASE / "merged data" / "강우량_2009_2026.csv",
+    "OUT_DIR": BASE / "Rainfall zonation results",
     "EXCLUDE_STATIONS": ["북한산", "북악산"],
     "YEARS": list(range(2010, 2027)),
     "TRAIN_YEARS": list(range(2010, 2026)),

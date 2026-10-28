@@ -1,6 +1,6 @@
 """
 서울시 침수흔적도(연도별 shapefile, 2010~2025)를 공통 스키마로 맞춰
-하나의 shapefile(합친 침수흔적도/서울시_침수흔적도_2010_2025.shp)로 합치는 스크립트.
+하나의 shapefile(merged flood map/서울시_침수흔적도_2010_2025.shp)로 합치는 스크립트.
 
 - YEAR는 폴더 연도를 기준으로 한다 (원본 F_YR는 일부 오기가 있어 참고용으로만 보존).
 - GU_NAM은 ADM_CD 앞 5자리(시군구 코드)로 다시 채워 표기를 통일한다.
@@ -8,7 +8,7 @@
   서울시 폴리곤과 겹치는 것은 제거한다.
 
 실행:
-    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "침수흔적도 합치기.py"
+    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "merging flood map.py"
 """
 import glob
 import os
@@ -18,8 +18,8 @@ import geopandas as gpd
 import pandas as pd
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SRC_DIR = os.path.join(BASE_DIR, "침수흔적도")
-OUT_DIR = os.path.join(BASE_DIR, "합친 침수흔적도")
+SRC_DIR = os.path.join(BASE_DIR, "flood map")
+OUT_DIR = os.path.join(BASE_DIR, "merged flood map")
 OUT_PATH = os.path.join(OUT_DIR, "서울시_침수흔적도_2010_2025.shp")
 SOURCE_CRS = "EPSG:5179"
 

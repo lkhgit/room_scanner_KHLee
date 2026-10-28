@@ -1,0 +1,15 @@
+강우 권역화 결과 : Rainfall zonation results
+강우량 데이터 : Rainfall data
+격자 예측 결과 : Grid-level prediction results
+격자 클러스터링 결과 : Grid clustering results
+예측 모델 결과 : Prediction model results
+침수흔적도 : flood map
+합친 데이터 : merged data
+강우량 차원 축소 : Rainfall dimensionality reduction
+강우량 클러스터링 : Rainfall clustering
+강우량 클러스터링된 데이터 : rainfall clustered data
+격자 예측 : Grid-level prediction
+예측 모델 : cluster-level prediction
+최종 강우량 데이터 : rainfall data final ver
+침수흔적도 합치기 : merging flood map
+필지 클러스터링 : grid clustering

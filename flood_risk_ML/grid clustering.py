@@ -11,7 +11,7 @@
 한 번도 침수되지 않은 격자는 처음부터 제외한다.
 
 실행:
-    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "필지 클러스터링.py"
+    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "grid clustering.py"
 """
 import json
 import os
@@ -26,10 +26,10 @@ from sklearn.neighbors import BallTree
 from sklearn.preprocessing import StandardScaler
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-FLOOD_PATH = os.path.join(BASE_DIR, "합친 침수흔적도", "서울시_침수흔적도_2010_2025.shp")
-PC_PATH = os.path.join(BASE_DIR, "최종 강우량 데이터.csv")
-RAIN_FEATURE_PATH = os.path.join(BASE_DIR, "강우량 클러스터링된 데이터.csv")
-OUT_DIR = os.path.join(BASE_DIR, "격자 클러스터링 결과")
+FLOOD_PATH = os.path.join(BASE_DIR, "merged flood map", "서울시_침수흔적도_2010_2025.shp")
+PC_PATH = os.path.join(BASE_DIR, "rainfall data final ver.csv")
+RAIN_FEATURE_PATH = os.path.join(BASE_DIR, "rainfall clustered data.csv")
+OUT_DIR = os.path.join(BASE_DIR, "Grid clustering results")
 SOURCE_CRS = "EPSG:5179"
 
 CELL_SIZE_M = 100
@@ -66,7 +66,7 @@ def load_year_pcs():
     raw = pd.read_csv(RAIN_FEATURE_PATH, encoding="utf-8-sig").set_index("year")
     manual = ((raw[RAIN_FEATURES].values - RAIN_MEAN) / RAIN_STD) @ RAIN_COMPONENTS.T
     assert np.allclose(manual, pcs.loc[raw.index].values, atol=1e-6), "PC 값이 변환 파라미터와 다릅니다"
-    print(f"  PC 검증 완료: 변환 파라미터로 계산한 값과 '최종 강우량 데이터.csv' 일치 ({len(pcs)}개 연도)")
+    print(f"  PC 검증 완료: 변환 파라미터로 계산한 값과 'rainfall data final ver.csv' 일치 ({len(pcs)}개 연도)")
     return pcs.loc[YEARS]
 
 
