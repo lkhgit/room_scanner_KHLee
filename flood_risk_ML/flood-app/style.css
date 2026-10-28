@@ -1,0 +1,143 @@
+:root {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --text: #1c2430;
+  --muted: #687384;
+  --line: #e3e6eb;
+  --accent: #1d4ed8;
+  --accent-soft: #e8eefc;
+  --warn-bg: #fff4e0;
+  --warn: #9a5b00;
+  --up: #c81e1e;
+  --down: #1a7f37;
+  font-family: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  color: var(--text);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  font-size: 14px;
+  line-height: 1.5;
+}
+body.has-detail { grid-template-columns: 320px 1fr 360px; }
+
+button { font: inherit; cursor: pointer; }
+h1 { font-size: 18px; margin: 0; }
+h2 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+h3 { font-size: 12px; margin: 0 0 4px; color: var(--muted); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.sub { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.msg { margin: 6px 0 0; color: var(--muted); font-size: 12px; min-height: 1em; }
+
+#loading {
+  position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center;
+  background: var(--bg); font-size: 15px; color: var(--muted);
+}
+
+/* ---- 왼쪽 조작 패널 */
+#controls {
+  background: var(--panel); border-right: 1px solid var(--line);
+  overflow-y: auto; padding: 18px 18px 24px;
+}
+#controls section { margin-top: 22px; }
+
+#search-form { display: flex; gap: 6px; }
+#search-form input {
+  flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit;
+}
+#search-form button, .presets button, .seg button, .toggle button {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 6px 10px;
+}
+#search-results { list-style: none; padding: 0; margin: 6px 0 0; }
+#search-results li {
+  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-top: 4px; cursor: pointer;
+}
+#search-results li:hover { background: var(--accent-soft); }
+#search-results li span { display: block; font-size: 12px; color: var(--muted); }
+
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.presets button.on, .seg button.on, .toggle button.on {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+
+.slider { margin-bottom: 14px; }
+.slider-head { display: flex; align-items: baseline; gap: 8px; }
+.slider-head output { color: var(--muted); font-variant-numeric: tabular-nums; }
+.slider input { width: 100%; margin: 4px 0 0; accent-color: var(--accent); }
+.slider-ends { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+
+.warn { background: var(--warn-bg); color: var(--warn); padding: 8px 10px; border-radius: 8px; font-size: 12px; }
+
+.primary {
+  width: 100%; padding: 10px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600;
+}
+.primary.pulse { box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ---- 지도 */
+#map-wrap { position: relative; min-width: 0; }
+#map { position: absolute; inset: 0; }
+.map-card {
+  background: var(--panel); border-radius: 10px; padding: 10px 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .18); font-size: 12px;
+}
+.card-title { font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.card-note { color: var(--muted); margin: 6px 0 0; max-width: 240px; }
+.toggle { display: flex; gap: 4px; padding: 4px; }
+.seg { display: inline-flex; gap: 2px; }
+.seg button { padding: 1px 8px; font-size: 12px; }
+
+.rain-card { width: 290px; }
+.bar-row { display: grid; grid-template-columns: 82px 1fr 46px; align-items: center; gap: 6px; margin: 3px 0; }
+.bar { height: 10px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; }
+.bar-val { text-align: right; font-variant-numeric: tabular-nums; }
+
+.legend .lg-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.legend .lg-row i { width: 14px; height: 10px; border-radius: 2px; }
+.ramp { width: 180px; height: 10px; border-radius: 2px; }
+.ramp-lab { display: flex; justify-content: space-between; color: var(--muted); }
+
+/* ---- 오른쪽 상세 패널 */
+#detail {
+  position: relative; background: var(--panel); border-left: 1px solid var(--line);
+  overflow-y: auto; padding: 18px;
+}
+#detail h2 { font-size: 16px; color: var(--text); margin: 0; padding-right: 28px; }
+#detail section { border-top: 1px solid var(--line); padding: 12px 0; }
+#detail header { padding-bottom: 12px; }
+#detail p { margin: 0; }
+#detail p + p { margin-top: 6px; }
+.close {
+  position: absolute; top: 12px; right: 12px; border: 0; background: none; font-size: 22px; line-height: 1; color: var(--muted);
+}
+.big { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.big small, .mid small { font-size: 13px; font-weight: 400; color: var(--muted); }
+.mid { font-size: 16px; font-weight: 600; }
+.muted { color: var(--muted); }
+.note { font-size: 12px; color: var(--muted); }
+.note.stale { color: var(--warn); }
+.delta { font-size: 14px; font-weight: 600; }
+.delta.up { color: var(--up); }
+.delta.down { color: var(--down); }
+.sim { list-style: none; padding: 0; margin: 0; }
+.sim li { display: flex; justify-content: space-between; padding: 2px 0; }
+.sim .yes { color: var(--up); }
+.sim .no { color: var(--muted); }
+.notice { margin-top: 8px; padding: 10px 12px; background: var(--bg); border-radius: 8px; font-size: 12px; color: var(--muted); }
+
+/* ---- 모바일: 조작 패널 위, 지도 가운데, 상세 패널은 아래에서 올라오는 시트 */
+@media (max-width: 900px) {
+  body, body.has-detail { display: flex; flex-direction: column; }
+  #controls { max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--line); padding: 14px 16px; }
+  #controls section { margin-top: 14px; }
+  #map-wrap { flex: 1; min-height: 240px; }
+  #detail {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; max-height: 60vh;
+    border-left: 0; border-radius: 14px 14px 0 0; box-shadow: 0 -4px 16px rgba(0, 0, 0, .18); padding: 16px;
+  }
+  .rain-card { width: 240px; }
+  .bar-row { grid-template-columns: 70px 1fr 42px; }
+}

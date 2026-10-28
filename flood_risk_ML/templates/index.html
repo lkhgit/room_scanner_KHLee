@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>서울시 침수 빈도 히트맵</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: "Malgun Gothic", sans-serif;
+        }
+        header {
+            background: #1f2937;
+            color: #fff;
+            padding: 12px 20px;
+        }
+        header h1 {
+            margin: 0 0 4px 0;
+            font-size: 18px;
+        }
+        header p {
+            margin: 0;
+            font-size: 13px;
+            color: #cbd5e1;
+        }
+        #map-wrap {
+            width: 100%;
+            height: calc(100% - 70px);
+        }
+        #map-wrap iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>서울시 침수 빈도 히트맵</h1>
+        <p>
+            100m 격자 기준 · 침수 이력 있는 셀 {{ cell_count }}개 · 최대 빈도 {{ max_freq }}회 ·
+            2010~2025년 중 자료가 있는 14개년 기준 (2015·2021년 자료 없음) ·
+            색상 = 침수 빈도 × 평균 침수심. 격자를 클릭하면 상세 이력이 표시됩니다.
+        </p>
+    </header>
+    <div id="map-wrap">
+        {{ map_html | safe }}
+    </div>
+</body>
+</html>

@@ -1,0 +1,126 @@
+침수흔 적도 전산화 방법
+NDMS 파일 속성
+침수심선
+컬럼명
+컬럼설명
+컬럼타입
+컬럼사이즈
+예시(출력 값)
+설명
+F_SHIM
+침수심
+십진수(real),double
+17.8
+0.123
+소수점 최대 3자리
+F_AREA
+침수면적(mi)
+십진수(real). double
+17.8
+456.789
+소수점 최대 3자리
+ADM_CD
+법정동 코드
+텍스트(string).string
+10
+1011011122
+FYR
+침수년도
+텍스트(string)Lstring
+10
+2022
+FLZONENM
+침수지구
+텍스트(string).string
+27
+노원구 상계동 1234
+피해종류
+피해종류
+텍스트(string).string
+10
+주택
+주택, 상가중 택1
+침수위선
+컬럼명
+컬럼설명
+컬럼타입
+컬럼사이즈
+예시(출력 값)
+설명
+FDISA_NM
+침수재해명
+텍스트(string).string
+50
+2022년 8월 집중호우
+집중호우 또는 태풍명 입력
+FAVR_HGT
+평균침수위(해발고도)
+십진수(real) double
+17,8
+123.321
+해발고도값 + 침수심
+FAREA
+침수면적(mf)
+십진수(real). double
+17,8
+456.789
+소수점 최대 3자리
+ADM_CD
+법정동코드
+텍스트(string).Lstring
+10
+1011011122
+FSAT_YMD
+침수시작년월일
+텍스트(string).string
+10
+20220801
+8자리
+FEND YMD
+침수종료년월일
+텍스트(string)_string
+10
+20220802
+8자리
+F_SAT_TM
+침수시작시간(24시간기준) 텍스트(string)_string
+8
+12
+24시간기준
+FEND TM
+침수종료시간(24시간기준) 텍스트(string)string
+8
+9
+24시간기준
+F_RSN_DTL
+침수원인상세
+텍스트(string)Lstring
+254
+내수침수
+원인을 상세히 입력
+FLZONENM
+침수지구
+텍스트(string)_string
+27
+노원구 상계동 1234
+INVYR
+조사년도
+텍스트(string) string
+10
+2022
+FYR
+침수년도
+텍스트(string)._string
+10
+2022
+피해종류
+피해종류
+텍스트(string).string
+10
+상가
+주택, 상가중 택1
+※각자치구별 침수심선 파일 4개(dbf, prj, shp, shx
+침수위선 파일 4개(dbf, prj, shp, shx) -> 연도별 총 8개의 파일이
+생성되어야함
+20
+
