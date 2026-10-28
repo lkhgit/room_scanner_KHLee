@@ -1,0 +1,41 @@
+newmtl wall_00
+Ka 1 1 1
+Kd 1 1 1
+Ks 0 0 0
+illum 1
+map_Kd wall_00_painted.png
+
+newmtl wall_01
+Ka 1 1 1
+Kd 1 1 1
+Ks 0 0 0
+illum 1
+map_Kd wall_01_painted.png
+
+newmtl wall_02
+Ka 1 1 1
+Kd 1 1 1
+Ks 0 0 0
+illum 1
+map_Kd wall_02_painted.png
+
+newmtl wall_03
+Ka 1 1 1
+Kd 1 1 1
+Ks 0 0 0
+illum 1
+map_Kd wall_03_painted.png
+
+newmtl floor
+Ka 1 1 1
+Kd 1 1 1
+Ks 0 0 0
+illum 1
+map_Kd floor.png
+
+newmtl ceiling
+Ka 1 1 1
+Kd 1 1 1
+Ks 0 0 0
+illum 1
+map_Kd ceiling.png
