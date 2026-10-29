@@ -1,6 +1,6 @@
 """
-강우 지도에 필요한 관측소 좌표와 서울 구 경계를 내려받아 침수 위험/data/에 저장한다.
-강우량 클러스터링.py의 STATION_COORDS, SEOUL_GU_PATH와 같은 경로·형식이다.
+강우 지도에 필요한 관측소 좌표와 서울 구 경계를 내려받아 flood_risk_ML/data/에 저장한다.
+Rainfall clustering.py의 STATION_COORDS, SEOUL_GU_PATH와 같은 경로·형식이다.
 
 출처
   관측소 좌표: 기상청 국가기후데이터센터 AWS 관측지점정보 (2026-10-22 기준 유효 이력)
@@ -9,12 +9,12 @@
   서울 구 경계: 통계청 2013 행정구역 (southkorea/seoul-maps, kostat/2013 simple)
               https://github.com/southkorea/seoul-maps
 
-출력 (침수 위험/data/)
+출력 (flood_risk_ML/data/)
   station_coords.csv   name, stn, lat, lon  (name = region_assignment.csv의 지점명)
   seoul_gu.geojson     서울 25개 구 폴리곤 (WGS84)
 
 실행:
-    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "flood-app\\tools\\fetch_geo.py"
+    py "app\\flood_simulator\\tools\\fetch_geo.py"     (저장소 최상위 폴더에서)
 """
 import csv
 import json
@@ -22,9 +22,9 @@ import os
 import urllib.request
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASE_DIR = os.path.dirname(APP_DIR)
+BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(APP_DIR)), "flood_risk_ML")
 OUT_DIR = os.path.join(BASE_DIR, "data")
-ASSIGN_PATH = os.path.join(BASE_DIR, "강우 권역화 결과", "region_assignment.csv")
+ASSIGN_PATH = os.path.join(BASE_DIR, "Rainfall zonation results", "region_assignment.csv")
 
 AWS_URL = "https://raw.githubusercontent.com/gud1396-coder/weather-station-explorer/HEAD/data/aws.json"
 GU_URL = ("https://raw.githubusercontent.com/southkorea/seoul-maps/master/"

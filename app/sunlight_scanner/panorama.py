@@ -83,7 +83,7 @@ class Rig:
             print("방위 센서: 없음 (북쪽은 저장되지 않음)")
         else:
             print("방위 센서: 연결됨, 저장된 지자기 보정값 " +
-                  ("불러옴" if self.imu_calib_loaded else "없음 ※ bno055_compass_save.ino로 먼저 보정·저장하세요"))
+                  ("불러옴" if self.imu_calib_loaded else "없음 ※ bno055_compass.ino로 먼저 보정·저장하세요"))
 
     def imu_status(self):
         """(센서 있음, EEPROM 보정값 불러옴)"""

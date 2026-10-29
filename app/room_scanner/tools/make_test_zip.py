@@ -1,6 +1,6 @@
 """Builds a scan bundle (.zip) from an existing logger.py session, for developing without the rig.
 
-    python tools/make_test_zip.py "../mold scanner/data/20261021_2225" test_bundle.zip [--heading 30] [--fake-panorama]
+    python tools/make_test_zip.py "../mold_scanner/data/20261021_2225" test_bundle.zip [--heading 30] [--fake-panorama]
 
 --fake-panorama adds a synthetic 2:1 test image (compass-coloured bands) so the room-image projection can be checked;
 it is not a real room, so the 3D room model built from it is meaningless.

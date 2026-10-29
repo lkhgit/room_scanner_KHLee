@@ -2,8 +2,8 @@
 // 기준값은 check_reference.py가 만든 data/../tools/reference.json (scenario_params.json 원본 정밀도로 계산).
 //
 // 실행:
-//   & "C:\Users\KHLee\AppData\Local\Python\bin\python.exe" "flood-app\tools\check_reference.py"
-//   node "flood-app\tools\check_model.mjs"
+//   py "app\flood_simulator\tools\check_reference.py"     (저장소 최상위 폴더에서)
+//   node "app\flood_simulator\tools\check_model.mjs"
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

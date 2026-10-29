@@ -1,4 +1,4 @@
-"""Runs sunlight scanner/sun_calculator.py unchanged, but with every on-screen string in English.
+"""Runs sunlight_scanner/sun_calculator.py unchanged, but with every on-screen string in English.
 
 Usage: sun_runner.py <same arguments as sun_calculator.py>
 The calculation code is not touched: the viewer template is translated in memory before main() runs, and the
@@ -9,7 +9,7 @@ import re
 import sys
 from pathlib import Path
 
-SUN = Path(__file__).resolve().parents[2] / "sunlight scanner" / "sun_calculator.py"
+SUN = Path(__file__).resolve().parents[2] / "sunlight_scanner" / "sun_calculator.py"
 
 # Longest first. Applied to the viewer template and to the generated viewer / json files.
 PAIRS = [

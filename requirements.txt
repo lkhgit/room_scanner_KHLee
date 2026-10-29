@@ -1,0 +1,47 @@
+# Python 3.10+
+# Install:  py -m pip install -r requirements.txt
+# (Keep this file ASCII-only: older pip on Korean Windows reads it as cp949.)
+
+# --- Common: app/room_scanner, mold_scanner, sunlight_scanner, docs/_build ---
+numpy
+scipy
+pandas
+pyyaml
+requests
+flask>=3.0
+pyserial                # import serial
+opencv-python           # import cv2
+Pillow                  # import PIL
+tzdata                  # zoneinfo("Asia/Seoul") on Windows has no system tz database
+
+# --- flood_risk_ML ---
+scikit-learn>=1.3       # sklearn.cluster.HDBSCAN
+geopandas               # reads shapefiles (pulls in pyogrio)
+shapely>=2.0
+pyproj
+folium
+branca
+jinja2
+matplotlib
+plotly
+pyarrow                 # parquet read/write
+pymc                    # pulls in pytensor
+arviz
+h5netcdf                # posterior.nc read/write
+
+# --- sunlight_scanner: 3D room model / HorizonNet ---
+# For GPU, install torch first with the command from https://pytorch.org
+torch
+torchvision
+transformers            # OneFormer
+huggingface_hub
+trimesh
+tqdm
+tensorboardX            # HorizonNet train.py
+imageio                 # HorizonNet dataset prep
+pylsd-nova              # import pylsd (HorizonNet preprocess)
+open3d                  # HorizonNet layout_viewer.py
+
+# --- Dev / test tools ---
+pytest                  # app/mold_scanner/test_mold_simulator.py
+playwright              # app/room_scanner/tools/shot.py (then run: playwright install chromium)

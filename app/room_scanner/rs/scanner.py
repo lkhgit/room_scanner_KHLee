@@ -1,7 +1,7 @@
 """Scan wizard: drives the two existing devices from the server, then turns the result into a room.
 
-    photo module    rig_motor.ino (Arduino) + xiao_cam_serial.ino (XIAO)  -> ../sunlight scanner/panorama.py classes
-    surface module  surface_scan.ino (Arduino)                            -> ../mold scanner/logger.py classes
+    photo module    rig_motor.ino (Arduino) + xiao_cam_serial.ino (XIAO)  -> ../sunlight_scanner/panorama.py classes
+    surface module  surface_scan.ino (Arduino)                            -> ../mold_scanner/logger.py classes
 The two modules are used one after the other. Raw data is kept in scans/<id>/ next to a bundle.zip
 that can be uploaded again later.
 """

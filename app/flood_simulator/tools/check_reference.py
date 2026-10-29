@@ -1,9 +1,9 @@
 """
-check_model.mjs가 비교할 기준값을 만든다. 격자 예측.py의 predict_scenario와 같은 식을
+check_model.mjs가 비교할 기준값을 만든다. Grid-level prediction.py의 predict_scenario와 같은 식을
 scenario_params.json 원본 정밀도로 계산한다 (앱의 model.json은 소수점 4자리로 줄인 값).
 
 실행:
-    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "flood-app\\tools\\check_reference.py"
+    py "app\\flood_simulator\\tools\\check_reference.py"     (저장소 최상위 폴더에서)
 """
 import json
 import os
@@ -12,8 +12,8 @@ import numpy as np
 from scipy.special import expit
 
 TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = os.path.dirname(os.path.dirname(TOOLS_DIR))
-PARAMS_PATH = os.path.join(BASE_DIR, "격자 예측 결과", "scenario_params.json")
+BASE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(TOOLS_DIR))), "flood_risk_ML")
+PARAMS_PATH = os.path.join(BASE_DIR, "Grid-level prediction results", "scenario_params.json")
 META_PATH = os.path.join(os.path.dirname(TOOLS_DIR), "data", "meta.json")
 QUANTILE_CELLS = 200  # 분위수는 격자 일부만 비교
 

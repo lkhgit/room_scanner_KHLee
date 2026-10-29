@@ -9,7 +9,7 @@ Local web app that combines the sunlight calculator, mold simulator and flood-ri
 ### 1. 서버 켜기
 PowerShell에서:
 
-    cd "E:\메이커 최종\room-scanner"
+    cd app\room_scanner
     py -m pip install -r requirements.txt     # 처음 한 번만
     py server.py
 
@@ -17,7 +17,7 @@ PowerShell에서:
 
 - `python` 대신 `py`를 쓴다. 이 PC에서는 `python`이 pip 없는 MSYS2 Python(`C:\msys64\ucrt64\bin`)으로
   잡혀서 `No module named pip` 오류가 난다. 같은 이유로 `run.bat`도 그대로는 실패한다.
-- 반드시 `room-scanner` 폴더 안에서 실행한다 (상위 폴더에서는 `server.py`를 찾지 못한다).
+- 반드시 `app/room_scanner` 폴더 안에서 실행한다 (상위 폴더에서는 `server.py`를 찾지 못한다).
 - 코드를 고친 뒤에는 서버를 껐다가 다시 켠다.
 
 ### 2. 방 스캔하기 (Home -> Start Room Scan)
@@ -25,8 +25,8 @@ PowerShell에서:
 
 | 단계 | 모듈 | 펌웨어 | 연결할 포트 |
 |---|---|---|---|
-| 사진 | 팬·틸트 리그 + 카메라 | `../sunlight scanner/rig_motor`, `xiao_cam_serial` | 리그 아두이노, XIAO 카메라 (서로 다른 COM 포트) |
-| 표면 | 표면 온습도 기기 | `../mold scanner/surface_scan` | 아두이노 1개 |
+| 사진 | 팬·틸트 리그 + 카메라 | `../sunlight_scanner/rig_motor`, `xiao_cam_serial` | 리그 아두이노, XIAO 카메라 (서로 다른 COM 포트) |
+| 표면 | 표면 온습도 기기 | `../mold_scanner/surface_scan` | 아두이노 1개 |
 
 1. **방 정보**: 방 이름, 장소, 위도·경도, 북쪽 방위각, 카메라 높이 입력 (이름 외에는 비워도 됨).
    위도·경도가 있으면 표면 스캔 직후 기상청 초단기실황을 받아 `outdoor.csv`에 저장한다.
@@ -50,21 +50,21 @@ PowerShell에서:
 - zip 번들도 `photos/meta.json`에 `north`(`panorama.py`가 만든 것)가 있으면 방위각을 자동으로 읽는다.
 
 ### 3. 이미 있는 번들 올리기 (Home -> Upload Scan)
-`.zip` 번들을 끌어다 놓는다. 테스트용으로 폴더에 있는 `test_bundle.zip`을 써도 된다.
+`.zip` 번들을 끌어다 놓는다. 테스트용으로 폴더에 있는 `bundle.zip`을 써도 된다.
 
 ### 추가 설정 (선택)
 - 일조의 3D 방 모델 단계: `py -m pip install torch transformers` + 기존 스크립트가 쓰는 HorizonNet 가중치.
-- 침수 탭 장소 검색: 서버가 `../mold scanner/kma.py`의 `KAKAO_REST_KEY`로 대신 검색한다 (`/api/places`, JavaScript 키 불필요).
-- 곰팡이 시뮬레이션의 날씨 데이터: `../mold scanner/kma.py`의 기상청 인증키.
+- 침수 탭 장소 검색: 서버가 `../mold_scanner/kma.py`의 `KAKAO_REST_KEY`로 대신 검색한다 (`/api/places`, JavaScript 키 불필요).
+- 곰팡이 시뮬레이션의 날씨 데이터: `../mold_scanner/kma.py`의 기상청 인증키.
 
 ## Notes
 
 - Home: upload a scan bundle (.zip). Format: see `rs/bundle.py`. Make a test bundle:
-  `python tools/make_test_zip.py "../mold scanner/data/20261021_2225" test_bundle.zip --heading 30 --fake-panorama`
-- Existing scripts in ../sunlight scanner, ../mold scanner and ../flood-app are used unchanged
+  `python tools/make_test_zip.py "../mold_scanner/data/20261021_2225" test_bundle.zip --heading 30 --fake-panorama`
+- Existing scripts in ../sunlight_scanner, ../mold_scanner and ../flood_simulator are used unchanged
   (the Flood tab uses an English copy in static/flood).
 - The Sunlight room-model step needs torch + transformers + the HorizonNet weights used by the existing script.
 - Scan wizard (Home -> Start Room Scan): runs the two modules one after the other, using the classes in
-  ../sunlight scanner/panorama.py (rig_motor + XIAO camera) and ../mold scanner/logger.py (surface_scan).
+  ../sunlight_scanner/panorama.py (rig_motor + XIAO camera) and ../mold_scanner/logger.py (surface_scan).
   Raw data and a re-uploadable bundle.zip are kept in scans/<id>/.
-- Settings: config.yaml. API keys (KMA, Kakao REST) are read from ../mold scanner/kma.py.
+- Settings: config.yaml. API keys (KMA, Kakao REST) are read from ../mold_scanner/kma.py.

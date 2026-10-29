@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Room Scanner Demo</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .demo-tag { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--warn); background: var(--warn-bg); border-radius: 999px; padding: 2px 10px; }
+    .banner { margin: 0; border-radius: 0; }
+    .bar output { font-size: 13px; color: var(--text); min-width: 90px; }
+    .how { overflow-y: auto; width: 100%; }
+    .how .page { max-width: 820px; }
+    .how .seg { margin: 10px 0 18px; }
+    .how .seg button { padding: 7px 14px; font-weight: 600; }
+    .how .steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+    .how .steps li { counter-increment: step; margin-bottom: 12px; }
+    .how .steps h2 { color: var(--text); font-size: 15px; margin: 0 0 4px; }
+    .how .steps h2::before { content: counter(step) ". "; color: var(--accent); }
+    .how .steps p { margin: 0; }
+    @media (max-width: 640px) { .demo-tag { display: none; } }
+  </style>
+  <script src="shim.js"></script>
+  <script type="importmap">
+  {"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+               "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}
+  </script>
+</head>
+<body>
+  <header id="top">
+    <a href="./" class="brand">Room Scanner</a>
+    <span class="tagline">Sunlight · Mold · Flood risk for a room you are considering</span>
+    <span class="demo-tag">Static demo</span>
+  </header>
+  <main id="app"></main>
+  <script src="app.bundle.js"></script>
+</body>
+</html>

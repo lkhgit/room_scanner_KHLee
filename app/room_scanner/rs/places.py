@@ -1,4 +1,4 @@
-"""Place search for the Flood tab, done on the server with the Kakao REST key in ../mold scanner/kma.py
+"""Place search for the Flood tab, done on the server with the Kakao REST key in ../mold_scanner/kma.py
 (so no Kakao JavaScript key is needed). Same order as the old in-browser search: keyword, then address."""
 import sys
 
