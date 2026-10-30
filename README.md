@@ -2,12 +2,25 @@
 
 ## Quick start
 
-| Goal | Steps |
-|---|---|
-| See the demo | Open [docs/index.html](docs/index.html) in Chrome or Edge. Nothing to install. |
-| Run the app | `py -m pip install -r requirements.txt`, then `cd app/room_scanner` and `py server.py`, and open http://localhost:8000 |
-| Try an upload | Home → Upload Scan → drop [app/room_scanner/bundle.zip](app/room_scanner/bundle.zip) |
-| Scan a room | Upload the `.ino` firmware to each board first (see [Scanning a room](#scanning-a-room)) |
+**Step 1. Download the repository.** Opening `index.html` on the GitHub website shows only its source code, so you need a copy on your computer:
+
+    git clone https://github.com/lkhgit/room_scanner_KHLee.git
+
+Or, on the GitHub page, click **Code → Download ZIP** and extract the ZIP file.
+
+**Step 2. See the demo (no installation).** In the downloaded folder, open `docs` and double-click `index.html`. It opens in your browser (use Chrome or Edge). The page needs an internet connection.
+
+**Step 3. Run the full app.** You need Python 3.10 or later. In a terminal at the repository root, run:
+
+    py -m pip install -r requirements.txt
+    cd app/room_scanner
+    py server.py
+
+Then open http://localhost:8000 in your browser.
+
+**Step 4. Try it without hardware.** Choose **Upload Scan** on the home screen, then drag in [app/room_scanner/bundle.zip](app/room_scanner/bundle.zip).
+
+**Step 5. Scan a real room.** First upload the `.ino` firmware to each board. See [Scanning a room](#scanning-a-room).
 
 ## 1. Setup
 
