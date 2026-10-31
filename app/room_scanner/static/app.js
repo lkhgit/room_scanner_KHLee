@@ -92,13 +92,13 @@ async function results(id) {
 
   // Draws the bar with the room name, location and north heading, and wires the Apply button.
   function renderBar() {
-    const p = room.params, c = p.heading_confidence;
+    const p = room.params;
     $("#bar").innerHTML = `<span class="name">${esc(room.name)}</span>
       <label>Latitude<input id="lat" value="${p.lat ?? ""}"></label>
       <label>Longitude<input id="lon" value="${p.lon ?? ""}"></label>
       <label>North heading (°)<input id="hd" value="${p.heading_deg ?? ""}" placeholder="0"></label>
       <button class="btn" id="apply">Apply</button>
-      <span class="conf dim" id="barmsg">${p.heading_deg == null ? "No north heading in this scan; 0° is assumed. " : ""}${c ? `Heading confidence: ${esc(c)}.` : ""}</span>`;
+      <span class="conf dim" id="barmsg">${p.heading_deg == null ? "No north heading in this scan; 0° is assumed." : ""}</span>`;
     $("#apply").onclick = async () => {
       $("#barmsg").textContent = "Applying…";
       try {
