@@ -53,7 +53,7 @@ PowerShell에서:
 `.zip` 번들을 끌어다 놓는다. 테스트용으로 폴더에 있는 `bundle.zip`을 써도 된다.
 
 ### 추가 설정 (선택)
-- 일조의 3D 방 모델 단계: `py -m pip install torch transformers` + 기존 스크립트가 쓰는 HorizonNet 가중치.
+- 일조의 3D 방 모델 단계: `py -m pip install torch transformers` + HorizonNet 서브모듈(`git submodule update --init`, 루트 README 참고). 가중치는 첫 실행 때 자동으로 받는다.
 - 침수 탭 장소 검색: 서버가 `../mold_scanner/kma.py`의 `KAKAO_REST_KEY`로 대신 검색한다 (`/api/places`, JavaScript 키 불필요).
 - 곰팡이 시뮬레이션의 날씨 데이터: `../mold_scanner/kma.py`의 기상청 인증키.
 
@@ -63,7 +63,8 @@ PowerShell에서:
   `python tools/make_test_zip.py "../mold_scanner/data/20261021_2225" test_bundle.zip --heading 30 --fake-panorama`
 - Existing scripts in ../sunlight_scanner, ../mold_scanner and ../flood_simulator are used unchanged
   (the Flood tab uses an English copy in static/flood).
-- The Sunlight room-model step needs torch + transformers + the HorizonNet weights used by the existing script.
+- The Sunlight room-model step needs torch + transformers + the HorizonNet submodule (`git submodule update --init`,
+  see the root README). The weights are downloaded automatically on the first run.
 - Scan wizard (Home -> Start Room Scan): runs the two modules one after the other, using the classes in
   ../sunlight_scanner/panorama.py (rig_motor + XIAO camera) and ../mold_scanner/logger.py (surface_scan).
   Raw data and a re-uploadable bundle.zip are kept in scans/<id>/.

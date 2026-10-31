@@ -26,9 +26,9 @@ Their structure makes poor living conditions common: little sunlight, damp walls
 
 **Step 2. Download the repository** (only needed to run the full app). Opening files on the GitHub website shows only their source code, so you need a copy on your computer:
 
-    git clone https://github.com/lkhgit/room_scanner_KHLee.git
+    git clone --recurse-submodules https://github.com/lkhgit/room_scanner_KHLee.git
 
-Or, on the GitHub page, click **Code → Download ZIP** and extract the ZIP file.
+Or, on the GitHub page, click **Code → Download ZIP** and extract the ZIP file. The ZIP does not include HorizonNet (a submodule), so also download https://github.com/lkhgit/HorizonNet (**Code → Download ZIP**) and extract its contents into `app/sunlight_scanner/HorizonNet/`.
 
 **Step 3. Run the full app.** You need Python 3.10 or later. In a terminal at the repository root, run:
 
@@ -54,12 +54,17 @@ Before you upload or scan, enter your API keys in [app/mold_scanner/kma.py](app/
 - For GPU support, install `torch` with the command from https://pytorch.org first.
 - On Windows, use `py` instead of `python` if `python` reports `No module named pip`.
 
-**HorizonNet** (needed for the 3D room model in the Sunlight tab). It is not included in this repository:
+**HorizonNet** (needed for the 3D room model in the Sunlight tab) is a git submodule at `app/sunlight_scanner/HorizonNet/`. Clone with submodules:
 
-    cd app/sunlight_scanner
-    git clone https://github.com/sunset1995/HorizonNet.git
+    git clone --recurse-submodules https://github.com/lkhgit/room_scanner_KHLee.git
 
-Download `resnet50_rnn__mp3d.pth` (linked in the HorizonNet README) into `app/sunlight_scanner/HorizonNet/ckpt/`.
+If you already cloned without it, run this in the repository root:
+
+    git submodule update --init
+
+If you downloaded the ZIP instead, download https://github.com/lkhgit/HorizonNet as a ZIP too and extract its contents into `app/sunlight_scanner/HorizonNet/` (so that `model.py` is directly inside that folder).
+
+The submodule is [a fork](https://github.com/lkhgit/HorizonNet) of [sunset1995/HorizonNet](https://github.com/sunset1995/HorizonNet) (MIT License) with small patches for Python 3.12+ / torch 2.6+. The weights `resnet50_rnn__mp3d.pth` are downloaded from Hugging Face on the first run (about 330 MB) into `app/sunlight_scanner/HorizonNet/ckpt/`.
 
 ### API keys
 

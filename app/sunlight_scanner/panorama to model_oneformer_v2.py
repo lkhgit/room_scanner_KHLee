@@ -79,7 +79,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy.ndimage import binary_erosion, find_objects, label, map_coordinates
 
-# HorizonNet code is imported from the HorizonNet/ folder (a clone) next to this file
+# HorizonNet code is imported from the HorizonNet/ folder (a git submodule) next to this file
 HORIZONNET_DIR = Path(__file__).resolve().parent / "HorizonNet"
 sys.path.insert(0, str(HORIZONNET_DIR))
 
@@ -207,6 +207,10 @@ def detect_layout(pano_small, pth, cuboid, min_v=0.05, r=0.05, min_angle=30.0, a
     """
     import torch
     from shapely.geometry import Polygon
+    if not (HORIZONNET_DIR / "model.py").exists():   # submodule not checked out (cloned without --recurse-submodules)
+        sys.exit(f"HorizonNet code not found in {HORIZONNET_DIR}\n"
+                 "Run this in the repository root:  git submodule update --init\n"
+                 "(downloaded as a ZIP? extract https://github.com/lkhgit/HorizonNet into that folder instead)")
     from model import HorizonNet
     from inference import find_N_peaks
     from misc import post_proc
