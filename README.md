@@ -8,6 +8,12 @@
 
 Or, on the GitHub page, click **Code → Download ZIP** and extract the ZIP file.
 
+To see only the demo, you can download just the `docs` folder instead of the whole repository:
+
+    git clone --depth 1 --filter=blob:none --sparse https://github.com/lkhgit/room_scanner_KHLee.git
+    cd room_scanner_KHLee
+    git sparse-checkout set docs
+
 **Step 2. See the demo (no installation).** In the downloaded folder, open `docs` and double-click `index.html`. It opens in your browser (use Chrome or Edge). The page needs an internet connection.
 
 **Step 3. Run the full app.** You need Python 3.10 or later. In a terminal at the repository root, run:
