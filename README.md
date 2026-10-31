@@ -75,6 +75,17 @@ The keys in this repository are left empty on purpose. Enter your own keys near 
 
 Restart the server after entering the keys. Do not commit real keys to git.
 
+### Running without API keys
+
+The app starts and runs without any keys. Only the features that call the weather or place-search service are affected:
+
+| Feature | Without keys |
+|---|---|
+| Sunlight tab | Works. |
+| Flood tab | Works. Place search is unavailable (no `KAKAO_REST_KEY`), so click the map to pick a spot. |
+| Mold tab | Does not work. The simulation needs weather data and fails with "The weather-service key is not set". |
+| Uploading a bundle, scanning, 3D room model | Work. |
+
 The online demo needs no keys.
 
 ## 2. Demo (docs)
@@ -91,6 +102,14 @@ Uploading or processing scans, connecting devices, recalculating, and live weath
     py server.py
 
 Open http://localhost:8000. Press Ctrl+C to stop. Settings are in [app/room_scanner/config.yaml](app/room_scanner/config.yaml).
+
+### 3D model build time
+
+Building the 3D room model from the panorama can take a long time. While it runs, the tabs behave as follows:
+
+- **Sunlight calculator**: shows a loading window until the model is ready.
+- **Mold**: uses an icosahedron in place of the room model.
+- **Flood risk**: works normally, because it does not depend on the room model.
 
 ### Uploading a scan bundle
 
