@@ -38,6 +38,8 @@ Or, on the GitHub page, click **Code → Download ZIP** and extract the ZIP file
 
 Then open http://localhost:8000 in your browser.
 
+Before you upload or scan, enter your API keys in [app/mold_scanner/kma.py](app/mold_scanner/kma.py). Without them, the mold simulation and place search fail. See [API keys](#api-keys).
+
 **Step 4. Try it without hardware.** Choose **Upload Scan** on the home screen, then drag in [app/room_scanner/bundle.zip](app/room_scanner/bundle.zip).
 
 **Step 5. Scan a real room.** First upload the `.ino` firmware to each board. See [Scanning a room](#scanning-a-room).
@@ -59,12 +61,21 @@ Then open http://localhost:8000 in your browser.
 
 Download `resnet50_rnn__mp3d.pth` (linked in the HorizonNet README) into `app/sunlight_scanner/HorizonNet/ckpt/`.
 
-**API keys** (optional). Enter them in [app/mold_scanner/kma.py](app/mold_scanner/kma.py). Do not commit real keys.
+### API keys
 
-| Variable | Source | Used for |
-|---|---|---|
-| `KMA_SERVICE_KEY` | data.go.kr (Korea Meteorological Administration) | Weather data for the mold simulation |
-| `KAKAO_REST_KEY` | Kakao Developers REST API key | Place search in the Flood tab |
+The keys in this repository are left empty on purpose. Enter your own keys near the top of [app/mold_scanner/kma.py](app/mold_scanner/kma.py):
+
+    KMA_SERVICE_KEY = "your data.go.kr service key"
+    KAKAO_REST_KEY = "your Kakao REST API key"
+
+| Variable | Where to get it | Used for | Without it |
+|---|---|---|---|
+| `KMA_SERVICE_KEY` | [data.go.kr](https://www.data.go.kr): sign up, then apply for the KMA APIs "ASOS hourly data" (종관기상관측 시간자료), "ASOS daily data" (종관기상관측 일자료), and "short-term forecast" (단기예보 조회서비스). One service key works for all three. | Weather data for the mold simulation; outdoor air at scan time | The Mold tab fails with "The weather-service key is not set". |
+| `KAKAO_REST_KEY` | [Kakao Developers](https://developers.kakao.com): create an app and copy its **REST API key** (not the JavaScript key). | Place search in the Flood tab; finding coordinates from a place name | Place search does not work. You can still click the map to pick a spot. |
+
+Restart the server after entering the keys. Do not commit real keys to git.
+
+The online demo needs no keys.
 
 ## 2. Demo (docs)
 
