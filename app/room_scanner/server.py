@@ -1,6 +1,7 @@
 """Room Scanner local server. Run: python server.py  (then open http://localhost:8000)"""
 import gzip
 import json
+import mimetypes
 import tempfile
 import threading
 from datetime import date
@@ -11,6 +12,12 @@ from flask import Flask, Response, abort, jsonify, request, send_file, send_from
 from rs import pipeline, places, rooms, scanner
 from rs.bundle import BundleError
 from rs.settings import CFG, ROOT
+
+# On Windows, mimetypes reads the registry, which some PCs set to .js = text/plain;
+# browsers then refuse to run <script type="module">. Pin the types here.
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("text/css", ".css")
 
 app = Flask(__name__, static_folder=str(ROOT / "static"), static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 ** 3
