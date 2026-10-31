@@ -1,0 +1,3 @@
+[submodule "app/sunlight_scanner/HorizonNet"]
+	path = app/sunlight_scanner/HorizonNet
+	url = https://github.com/lkhgit/HorizonNet.git
