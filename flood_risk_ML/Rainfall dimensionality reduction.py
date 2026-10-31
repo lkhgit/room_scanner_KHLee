@@ -1,3 +1,8 @@
+"""Reduces the regional rainfall features per year to principal components with PCA.
+
+Saves PC1-PC4 per year to 'rainfall data final ver.csv' and writes the standardisation and component vectors, with
+instructions for transforming new data the same way, to '강우량 차원 축소 방법.txt'.
+"""
 import os
 
 import numpy as np
@@ -8,15 +13,15 @@ from sklearn.preprocessing import StandardScaler
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "rainfall clustered data.csv")
 
-# 데이터 로드: 각 행 = 연도, 각 열 = 권역별 강우 특징(max1h, max24h)
+# load the data: one row per year, one column per regional rainfall feature (max1h, max24h)
 df = pd.read_csv(CSV_PATH)
 years = df["year"].values
 X = df.drop(columns=["year"]).values
 
-# max1h와 max24h는 스케일이 크게 다르므로 표준화 후 PCA 적용
+# max1h and max24h have very different scales, so standardise before PCA
 X_scaled = StandardScaler().fit_transform(X)
 
-# 가능한 최대 주성분 수는 min(샘플 수, 특징 수)
+# the largest possible number of components is min(samples, features)
 max_dim = min(10, X_scaled.shape[0], X_scaled.shape[1])
 
 pca = PCA(n_components=max_dim)
@@ -31,13 +36,13 @@ print("-" * 36)
 for k in range(1, max_dim + 1):
     print(f"{k:>4} | {explained[k - 1]:>10.4f} | {cumulative[k - 1]:>14.4f}")
 
-# 각 연도의 주성분 좌표 (전체 차원)
+# principal component coordinates of every year (all dimensions)
 pca_df = pd.DataFrame(X_pca, columns=[f"PC{i + 1}" for i in range(max_dim)])
 pca_df.insert(0, "year", years)
 print("\n연도별 주성분 좌표:")
 print(pca_df.round(3).to_string(index=False))
 
-# 4차원 결과 저장
+# save the 4-dimensional result
 N_KEEP = 4
 OUT_CSV = os.path.join(BASE_DIR, "rainfall data final ver.csv")
 OUT_TXT = os.path.join(BASE_DIR, "강우량 차원 축소 방법.txt")
@@ -45,12 +50,13 @@ OUT_TXT = os.path.join(BASE_DIR, "강우량 차원 축소 방법.txt")
 pca_df[["year"] + [f"PC{i + 1}" for i in range(N_KEEP)]].to_csv(OUT_CSV, index=False, encoding="utf-8-sig")
 print(f"\n저장: {OUT_CSV}")
 
-# 새 데이터에 같은 변환을 적용하기 위한 설명과 파라미터 저장
+# save the instructions and parameters for applying the same transformation to new data
 feature_names = list(df.drop(columns=["year"]).columns)
 scaler = StandardScaler().fit(X)
 
 
 def fmt_vec(v):
+    """Formats a vector as a bracketed list with 10 decimals."""
     return "[" + ", ".join(f"{x:.10f}" for x in v) + "]"
 
 
@@ -118,7 +124,7 @@ with open(OUT_TXT, "w", encoding="utf-8") as f:
     f.write("\n".join(lines) + "\n")
 print(f"저장: {OUT_TXT}")
 
-# 검증: 저장한 파라미터로 직접 계산한 값이 PCA 결과와 같은지 확인
+# check: values computed by hand from the saved parameters must equal the PCA result
 manual = ((X - scaler.mean_) / scaler.scale_) @ pca.components_[:N_KEEP].T
 assert np.allclose(manual, X_pca[:, :N_KEEP]), "수동 변환 결과가 PCA 결과와 다릅니다"
 print("검증 완료: 파라미터로 직접 변환한 값이 PCA 결과와 일치")

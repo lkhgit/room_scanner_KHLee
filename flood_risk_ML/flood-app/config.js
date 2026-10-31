@@ -1,4 +1,5 @@
-// 카카오 개발자 콘솔의 JavaScript 키 (REST 키 아님). 앱을 올릴 도메인(로컬은 http://localhost:8000)을 등록해야 한다.
+// JavaScript key from the Kakao Developers console (not the REST key). The domain that serves the app
+// (http://localhost:8000 when local) must be registered for it.
 window.FLOOD_APP_CONFIG = {
   KAKAO_JS_KEY: "",
 };

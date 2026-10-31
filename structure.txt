@@ -1,25 +1,72 @@
-room-scanner/
-├── README.md               ← 데모 영상 · 한 줄 소개 · 완료/진행 중 · 실행 방법
-├── requirements.txt
-├── .gitignore
-├── app/                    ← maker final (햇빛 + 침수 + 곰팡이 통합 앱)
-│   ├── README.md           ← 실행법, 샘플 데이터로 하드웨어 없이 돌리는 법
-│   └── sample_data/
-├── flood-risk/             ← 침수 위험 모델 (학습 → 예측 → 출력)
-│   └── README.md           ← 데이터 출처, 학습 방법, 결과
-├── hardware/
-│   ├── README.md           ← 부품 목록, 배선, 라벨 붙인 사진
-│   ├── firmware/           ← 아두이노(.ino) 코드
-│   ├── calibration/        ← bno055 나침반
-│   └── cad/                ← .3mf 출력 파일
-├── experiments/            ← 시행착오 기록
-│   ├── README.md           ← 단계별 한눈 요약표
-│   ├── 01_motor/
-│   ├── 02_sensors/
-│   ├── 03_capture/
-│   ├── 04_panorama/
-│   ├── 05_horizonnet_3d/
-│   └── 06_window_detection/
-└── docs/
-    ├── build-log.md        ← 제작 과정 서술
-    └── images/             ← 선별한 결과·과정 사진
+room_scanner_KHLee/
+├── README.md                 Overview, demo links, quick start, setup, how to run and scan
+├── requirements.txt          Python packages for the whole project
+├── structure.txt             This file
+│
+├── docs/                     GitHub Pages demo (https://lkhgit.github.io/room_scanner_KHLee/)
+│   ├── index.html            Demo page: one precomputed scan of a real classroom, no server needed
+│   ├── shim.js               Replaces the server API calls with the precomputed data
+│   ├── app.bundle.js         Web app code bundled into a classic script (works without a server)
+│   ├── style.css
+│   ├── data/                 Precomputed results: room model, mold simulation, sunlight (4 dates), room list
+│   ├── flood/                Flood map page and its bundled data
+│   └── README.md             What the demo can and cannot do, how the snapshot is built
+│
+├── app/                      The application, one folder per risk plus the main web app
+│   ├── room_scanner/         Main web app (Python server + browser UI) that ties the three risks together
+│   │   ├── server.py         Starts the server (http://localhost:8000) and defines the API
+│   │   ├── config.yaml       Settings (ports, paths, devices)
+│   │   ├── rs/               Server modules: scan bundle format (bundle.py), processing pipeline (pipeline.py),
+│   │   │                     hardware control (scanner.py), room storage (rooms.py), place search (places.py),
+│   │   │                     room geometry (geometry.py), settings and translations (settings.py, i18n.py)
+│   │   ├── static/           Browser UI: home / scan / results screens (app.js, scan.js, mold.js),
+│   │   │                     plus the flood map under static/flood/
+│   │   └── tools/            Helper scripts: make a test bundle, take screenshots, run the sun calculation
+│   ├── sunlight_scanner/     Sunlight pipeline
+│   │   ├── rig_motor/        Arduino firmware for the pan-tilt rig motors
+│   │   ├── xiao_cam_serial/  Arduino firmware for the XIAO camera module (sends images over serial)
+│   │   ├── panorama.py       Captures a panorama with the rig
+│   │   ├── stitch_panorama.py   Stitches the captured frames into one panorama
+│   │   ├── calibrate.py      Camera / heading calibration
+│   │   ├── refine.py         Refines the room layout and window positions
+│   │   ├── sun_calculator.py Sun path through the windows -> hours of direct light
+│   │   └── panorama to model_oneformer_v2.py   Panorama -> 3D room model (HorizonNet layout + OneFormer windows)
+│   ├── mold_scanner/         Mold pipeline
+│   │   ├── surface_scan/     Arduino firmware: IR thermometer + humidity sensor scan of the walls
+│   │   ├── mold_simulator.py Estimates condensation and mold growth per wall direction
+│   │   ├── kma.py            Fetches Korea Meteorological Administration weather (API key goes here)
+│   │   ├── logger.py         Logs sensor readings
+│   │   ├── data/kma_cache/   Cached hourly / daily weather so the simulator runs offline
+│   │   ├── asos_stations.yaml, 관측지점정보_종관기상관측.csv   Weather station list (name -> location)
+│   │   └── test_mold_simulator.py   Tests for the simulator
+│   └── flood_simulator/      Standalone browser flood-risk map (same code as app/room_scanner/static/flood)
+│
+├── flood_risk_ML/            Flood risk model: training data -> clustering -> prediction -> map data
+│   ├── flood map/            Yearly Seoul flood-trace maps (2010-2025, shapefiles)
+│   ├── merging flood map.py, floodmap.py   Merge the yearly maps into one dataset (merged flood map/)
+│   ├── build_grid.py         Splits Seoul into grid cells and counts past floods per cell
+│   ├── Rainfall data/        Hourly rainfall by station, per year
+│   ├── Rainfall dimensionality reduction.py, Rainfall clustering.py   Reduce rainfall patterns and group stations into zones
+│   ├── grid clustering.py    Groups grid cells with similar flood history
+│   ├── cluster-level prediction.py   Bayesian model: rainfall -> flood probability per cluster
+│   ├── Grid-level prediction.py      Applies the model to every grid cell
+│   ├── *results/ folders     Outputs of each step (clusters, coefficients, cross-validation, grid risk)
+│   ├── flood-app/            Browser map built from the results (the data is generated by tools/build_app_data.py)
+│   └── Kor-Eng.txt           Korean -> English name table for the renamed files and folders
+│
+├── ino_files_sensors/        Small Arduino sketches used to test each part on its own
+│   ├── i2c_scanner/          Finds I2C devices on the bus
+│   ├── compass_sensor_calibration/   BNO055 compass calibration
+│   ├── gy906_test/           GY-906 IR thermometer test
+│   ├── pan_tilt_motor_test/  Pan-tilt motor test
+│   └── cam_probe/            Camera module test
+│
+├── 3d_printed_models/        3D-print files for the rig (.3mf / .stl): base, motor link, camera holder,
+│                             sensor block and mount, covers
+│
+└── trial_and_errors/         Earlier experiments kept for reference (not used by the final app)
+    ├── scan.py, scan_only_motor.py   First scanning scripts
+    ├── panorama to model.py          First panorama -> 3D model script
+    ├── oneperformer_test.py, *_window_test.ipynb   Window detection trials (OneFormer, SegFormer)
+    ├── captures/                     Metadata of test captures
+    └── out/                          Generated room models from the experiments (.obj / .glb / .ply, viewers)

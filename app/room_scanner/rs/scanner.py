@@ -29,12 +29,14 @@ _s = None
 
 
 def _script(name, folder):
+    """Imports one of the existing device scripts (panorama.py, logger.py) from its folder."""
     if str(folder) not in sys.path:
         sys.path.insert(0, str(folder))
     return importlib.import_module(name)
 
 
 def ports():
+    """Lists the serial ports on this computer."""
     from serial.tools import list_ports
     return [{"device": p.device, "description": p.description} for p in sorted(list_ports.comports())]
 
@@ -44,6 +46,7 @@ class ScanError(Exception):
 
 
 def _need(stage):
+    """Raises ScanError unless a scan is in progress at one of the given stages."""
     if _s is None:
         raise ScanError("No scan is in progress.")
     if _s["stage"] not in stage:
@@ -51,6 +54,7 @@ def _need(stage):
 
 
 def _log(msg):
+    """Adds a timestamped line to the scan log, keeping the last 200 lines."""
     with _lock:
         if _s is not None:
             _s["log"].append(f"[{datetime.now():%H:%M:%S}] {msg}")
@@ -58,6 +62,7 @@ def _log(msg):
 
 
 def state():
+    """Returns the public part of the scan state with the last 40 log lines."""
     with _lock:
         if _s is None:
             return {"stage": None}
@@ -68,6 +73,7 @@ def state():
 
 # ------------------------------------------------------------------ session
 def start(info):
+    """Starts a new scan session and creates its folder under scans/."""
     global _s
     with _lock:
         if _s is not None and _s["stage"] not in ("done",):
@@ -84,6 +90,7 @@ def start(info):
 
 
 def cancel():
+    """Stops whatever is running, closes the ports and forgets the scan."""
     global _s
     with _lock:
         if _s is None:
@@ -101,6 +108,7 @@ def cancel():
 
 
 def _fail(msg, exc=None):
+    """Records an error message in the scan state and the log."""
     msg += f" ({exc})" if exc else ""
     with _lock:
         if _s is not None:
@@ -110,6 +118,7 @@ def _fail(msg, exc=None):
 
 # ------------------------------------------------------------------ photo module
 def photo_connect(arduino, camera):
+    """Opens the rig and the camera, measures north if the rig has a compass, and moves on to leveling."""
     with _lock:
         _need(("photo_connect",))
         _s.update(error=None, stage="photo_connecting")
@@ -153,6 +162,7 @@ def photo_connect(arduino, camera):
 
 
 def preview():
+    """Returns one JPEG frame from the camera for the leveling preview."""
     with _lock:
         _need(("leveling",))
         cam = _s["_cam"]
@@ -161,6 +171,7 @@ def preview():
 
 
 def move(axis, size, direction):
+    """Moves the rig by a preset number of half-steps and updates the shown angles and azimuth."""
     pano = _script("panorama", SUNLIGHT_DIR)
     with _lock:
         _need(("leveling",))
@@ -176,6 +187,7 @@ def move(axis, size, direction):
 
 
 def capture():
+    """Starts the automatic photo capture in a background thread."""
     with _lock:
         _need(("leveling",))
         _s["stage"] = "capturing"
@@ -267,6 +279,7 @@ def _close_photo():
 
 
 def photo_stop():
+    """Stops leveling or the running capture."""
     with _lock:
         _need(("capturing", "leveling"))
         if _s["stage"] == "leveling":
@@ -278,6 +291,7 @@ def photo_stop():
 
 
 def photo_skip():
+    """Skips the photo step and moves on to the surface scan."""
     with _lock:
         _need(("photo_connect",))
     _close_photo()
@@ -288,6 +302,7 @@ def photo_skip():
 
 
 def last_photo():
+    """Returns the path of the most recently captured photo, or None."""
     with _lock:
         if _s is None or not _s["photo"].get("last"):
             return None
@@ -296,6 +311,7 @@ def last_photo():
 
 # ------------------------------------------------------------------ surface module
 def surface_start(port, material):
+    """Opens the surface module port, sets up logger.py's session and starts the scan in a background thread."""
     with _lock:
         _need(("surface_connect",))
         _s.update(error=None, stage="surface_connecting")
@@ -338,10 +354,12 @@ def surface_start(port, material):
 
 
 def _surface(lg, ser, parser, ctrl, stop, ncst, sdir):
+    """Runs the surface scan until it is saved or stopped, logging the raw serial lines."""
     raw = (sdir / "serial_raw.log").open("a", encoding="utf-8")
     opened = time.monotonic()
 
     def feed(line):
+        """Logs one serial line, passes it to the parser and updates the face count."""
         raw.write(f"{lg.now_iso()}\t{line.rstrip()}\n")
         raw.flush()
         parser.handle(line)
@@ -366,6 +384,7 @@ def _surface(lg, ser, parser, ctrl, stop, ncst, sdir):
     orig_tick = ctrl.tick
 
     def tick():
+        """Runs the controller's tick and sends the scan command if the module never reported ready."""
         orig_tick()
         if not ready.is_set() and time.monotonic() - opened > READY_TIMEOUT_S:
             ready.set()
@@ -401,6 +420,7 @@ def _surface(lg, ser, parser, ctrl, stop, ncst, sdir):
 
 
 def surface_stop():
+    """Asks the surface module to stop scanning."""
     with _lock:
         _need(("surface_running",))
         ser = _s["_ser"]
@@ -410,6 +430,7 @@ def surface_stop():
 
 # ------------------------------------------------------------------ bundle -> room
 def finish():
+    """Packs the photos and surface data into bundle.zip and creates a room from it."""
     with _lock:
         _need(("ready",))
         d, info, sid = Path(_s["dir"]), _s["info"], _s["id"]

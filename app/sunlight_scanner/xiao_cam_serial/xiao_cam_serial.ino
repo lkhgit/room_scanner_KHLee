@@ -1,19 +1,19 @@
 // ============================================================
-//  XIAO ESP32S3 Sense - USB 시리얼 JPEG 카메라
+//  XIAO ESP32S3 Sense - JPEG camera over USB serial
 //
-//  Arduino IDE 설정:
-//    보드: XIAO_ESP32S3
+//  Arduino IDE settings:
+//    Board: XIAO_ESP32S3
 //    PSRAM: "OPI PSRAM"
 //    USB CDC On Boot: "Enabled"
 //
-//  시리얼 명령 (줄바꿈 '\n'으로 끝):
-//    C          사진 1장 촬영 -> "IMG <바이트수>\n" + JPEG 바이너리
-//    F <크기>   해상도 변경 (QVGA, VGA, SVGA, XGA, HD, SXGA, UXGA) -> "OK"
-//    ?          핑 -> "READY"
+//  Serial commands (ending with a newline '\n'):
+//    C          take one photo -> "IMG <byte count>\n" + JPEG binary
+//    F <size>   change the resolution (QVGA, VGA, SVGA, XGA, HD, SXGA, UXGA) -> "OK"
+//    ?          ping -> "READY"
 // ============================================================
 #include "esp_camera.h"
 
-// XIAO ESP32S3 Sense 카메라 핀
+// XIAO ESP32S3 Sense camera pins
 #define PWDN_GPIO_NUM   -1
 #define RESET_GPIO_NUM  -1
 #define XCLK_GPIO_NUM   10
@@ -34,6 +34,7 @@
 bool camOk = false;
 String lineBuf;
 
+// Turns a resolution name into the camera's frame size, or FRAMESIZE_INVALID.
 framesize_t parseSize(const String &s) {
   if (s == "QVGA") return FRAMESIZE_QVGA;
   if (s == "VGA")  return FRAMESIZE_VGA;
@@ -45,6 +46,7 @@ framesize_t parseSize(const String &s) {
   return FRAMESIZE_INVALID;
 }
 
+// Grabs and throws away n frames.
 void discardFrames(int n) {
   for (int i = 0; i < n; i++) {
     camera_fb_t *fb = esp_camera_fb_get();
@@ -52,6 +54,7 @@ void discardFrames(int n) {
   }
 }
 
+// Sets up the camera (JPEG, buffers in PSRAM) and starts at the preview resolution.
 bool initCamera() {
   camera_config_t c = {};
   c.ledc_channel = LEDC_CHANNEL_0;
@@ -70,27 +73,28 @@ bool initCamera() {
   c.pin_reset = RESET_GPIO_NUM;
   c.xclk_freq_hz = 20000000;
   c.pixel_format = PIXFORMAT_JPEG;
-  c.frame_size = FRAMESIZE_UXGA;      // 가장 큰 해상도로 초기화해야 버퍼가 충분함
-  c.jpeg_quality = 10;                // 낮을수록 고화질 (10~12 권장)
+  c.frame_size = FRAMESIZE_UXGA;      // initialise at the largest resolution so the buffers are big enough
+  c.jpeg_quality = 10;                // lower = better quality (10-12 recommended)
   c.fb_count = 2;
   c.fb_location = CAMERA_FB_IN_PSRAM;
-  c.grab_mode = CAMERA_GRAB_LATEST;   // 항상 최신 프레임
+  c.grab_mode = CAMERA_GRAB_LATEST;   // always the latest frame
 
   if (esp_camera_init(&c) != ESP_OK) return false;
 
   sensor_t *s = esp_camera_sensor_get();
-  if (s->id.PID == OV3660_PID) {      // 최근 출하분은 OV3660인 경우가 있음
+  if (s->id.PID == OV3660_PID) {      // recent units sometimes ship with an OV3660
     s->set_vflip(s, 1);
     s->set_brightness(s, 1);
     s->set_saturation(s, -2);
   }
-  s->set_framesize(s, FRAMESIZE_VGA); // 시작은 미리보기 해상도
+  s->set_framesize(s, FRAMESIZE_VGA); // start at the preview resolution
   discardFrames(3);
   return true;
 }
 
+// Takes a fresh photo and sends it as "IMG <bytes>" followed by the JPEG data.
 void sendFrame() {
-  // 버퍼에 남아 있을 수 있는 이전 프레임을 버리고 새로 찍음
+  // throw away any old frame still in the buffer and take a new one
   discardFrames(1);
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) { Serial.println("ERR capture"); return; }
@@ -107,6 +111,7 @@ void sendFrame() {
   esp_camera_fb_return(fb);
 }
 
+// Runs one serial command: ?, C or F <size>.
 void handleLine(String line) {
   line.trim();
   if (line.length() == 0) return;
@@ -121,13 +126,14 @@ void handleLine(String line) {
     framesize_t fs = parseSize(name);
     sensor_t *s = esp_camera_sensor_get();
     if (fs == FRAMESIZE_INVALID || s->set_framesize(s, fs) != 0) { Serial.println("ERR size"); return; }
-    discardFrames(3);  // 해상도 변경 직후 프레임은 버림 (노출 안정화)
+    discardFrames(3);  // drop the frames right after a resolution change (exposure settles)
     Serial.println("OK");
     return;
   }
   Serial.println("ERR");
 }
 
+// Opens the serial port, starts the camera and reports READY or the error.
 void setup() {
   Serial.begin(921600);
   Serial.setTimeout(50);
@@ -135,6 +141,7 @@ void setup() {
   Serial.println(camOk ? "READY" : "ERR camera init");
 }
 
+// Collects serial characters into lines and handles each complete line.
 void loop() {
   while (Serial.available()) {
     char ch = Serial.read();

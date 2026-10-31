@@ -1,10 +1,10 @@
-// 슬라이더 PC → 권역 강우 복원, 지도용 IDW 보간, 패턴 신뢰도, 비슷한 해. 화면 코드와 분리한 순수 함수.
+// Slider PCs -> regional rainfall, IDW interpolation for the map, pattern check, similar years. Pure functions kept apart from the view code.
 
 export const REGION_NAMES = ["North", "Southeast", "South-central", "Northeast", "West"];
-export const RAIN_SCALE = { max1h: 100, max24h: 450 };  // 지도 색 고정 척도 (mm)
+export const RAIN_SCALE = { max1h: 100, max24h: 450 };  // fixed colour scale of the map (mm)
 const IDW_POWER = 2;
 
-// x̂ = mean + std ⊙ (PC · components), 음수는 0, 1h > 24h이면 24h를 1h로 올림
+// Rebuilds regional rainfall: x̂ = mean + std ⊙ (PC · components); negatives become 0, and if 1h > 24h, 24h is raised to 1h.
 export function reconstruct(pca, pc) {
   const x = pca.mean.map((m, j) =>
     m + pca.std[j] * pc.reduce((s, v, k) => s + v * pca.components[k][j], 0));
@@ -18,8 +18,8 @@ export function reconstruct(pca, pc) {
   return { max1h, max24h };
 }
 
-// 화면 픽셀마다 권역별 IDW 가중치 (관측소 가중치를 소속 권역별로 합산, 합 = 1).
-// 관측소마다 소속 권역의 강우를 주므로 값 = Σ_r w_r · 권역 r 강우. 한 번만 계산해 둔다.
+// IDW weight of every region for every map pixel (station weights summed by the station's region, total = 1).
+// Each station gets its region's rainfall, so value = Σ_r w_r · rainfall of region r. Computed once.
 export function idwWeights(stations, bounds, width, height, nRegions) {
   const { south, west, north, east } = bounds;
   const lat0 = (south + north) / 2;
@@ -43,6 +43,7 @@ export function idwWeights(stations, bounds, width, height, nRegions) {
   return w;
 }
 
+// Interpolated rainfall for every map pixel from the regional values and the IDW weights.
 export function rainField(weights, values) {
   const nR = values.length, n = weights.length / nR;
   const out = new Float32Array(n);
@@ -54,13 +55,14 @@ export function rainField(weights, values) {
   return out;
 }
 
+// Euclidean distance between two PC vectors, each axis divided by its scale.
 function distance(a, b, scale) {
   let s = 0;
   for (let k = 0; k < scale.length; k++) s += ((a[k] - b[k]) / scale[k]) ** 2;
   return Math.sqrt(s);
 }
 
-// 가장 가까운 과거 연도까지의 거리가 과거 연도끼리의 최대 최근접 거리보다 멀면 "과거에 없던 패턴"
+// Finds the nearest past year; the pattern is "unusual" if it is farther away than any past year is from its nearest neighbour.
 export function patternCheck(meta, years, pc) {
   let best = null;
   for (const y of years) {
@@ -70,7 +72,7 @@ export function patternCheck(meta, years, pc) {
   return { ...best, unusual: best.dist > meta.pattern_max_nn_dist };
 }
 
-// 침수 데이터가 있는 해 중 PC1–PC3이 가장 가까운 k개
+// Returns the k years with flood data whose PC1–PC3 are closest.
 export function similarYears(meta, years, pc, k = 3) {
   return years
     .filter((y) => y.has_flood_data)

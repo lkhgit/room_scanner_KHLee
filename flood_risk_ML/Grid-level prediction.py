@@ -1,22 +1,23 @@
 """
-클러스터 침수 모델(Prediction model results/posterior.nc)에 격자 비례상수 q_g를 곱해 격자별 침수 확률을 예측한다.
+Predicts the flood probability of every grid cell by multiplying the cluster flood model
+(Prediction model results/posterior.nc) by a per-cell factor q_g.
 
-1. 클러스터 모델: η_c = α_c + β_c · z,  σ(η_c) = 그해 클러스터가 잠기는 사건(침수 비율 50% 이상)의 확률
-2. 격자 비례상수: q_g = (k_g + m) / (k̄_c + m)
-     k_g: 격자의 침수 연도 수, k̄_c: 클러스터 평균 침수 연도 수, m: 수축 강도
-     클러스터마다 log q_g의 평균이 0이 되도록 다시 맞춘다.
-3. 격자 침수 확률: 오즈_g = q_g × 오즈_c  ⇔  P_g = σ(η_c + log q_g)
-4. 불확실성: 사후 표본 500개 각각으로 3단계를 계산해 평균과 5–95% 분위수로 요약
+1. Cluster model: η_c = α_c + β_c · z,  σ(η_c) = probability that the cluster floods that year (flooded share of 50% or more)
+2. Cell factor: q_g = (k_g + m) / (k̄_c + m)
+     k_g: number of flood years of the cell, k̄_c: mean number of flood years in its cluster, m: shrinkage strength
+     log q_g is re-centred to mean 0 within each cluster.
+3. Cell flood probability: odds_g = q_g × odds_c  ⇔  P_g = σ(η_c + log q_g)
+4. Uncertainty: step 3 is computed for each of 500 posterior samples and summarised by the mean and 5–95% quantiles
 
-출력 (Grid-level prediction results/)
-  grid_flood_risk.csv   격자별 q_g, 연간 확률, 거주 L년 확률 (L = 2, 4)
-  q_summary.csv         클러스터별 q_g 분포 점검
-  scenario_params.json  앱에서 슬라이더 z로 실시간 계산할 때 쓰는 사후 표본과 격자별 log q_g
-  m_cv.csv              m 선택용 연도 단위 교차검증 격자 Brier 점수
+Output (Grid-level prediction results/)
+  grid_flood_risk.csv   q_g, annual probability and the probability over an L-year stay (L = 2, 4) per cell
+  q_summary.csv         check of the q_g distribution per cluster
+  scenario_params.json  posterior samples and per-cell log q_g the app uses to calculate live from the sliders z
+  m_cv.csv              year-by-year cross-validated cell Brier scores for choosing m
 
-침수 이력이 있는 격자(grid_clusters.csv)만 계산한다. 나머지 격자는 '기록 없음'이다.
+Only cells with flood history (grid_clusters.csv) are computed. All other cells are 'no record'.
 
-실행:
+Run:
     & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "Grid-level prediction.py"
 """
 import importlib.util
@@ -46,25 +47,26 @@ SEED = 42
 
 
 def load_module(name, path):
+    """Imports a Python file from a path as a module."""
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-# 학습 연도, 표준화, 침수 이력 표는 클러스터 모델과 똑같이 만든다
+# training years, standardisation and flood history tables are built exactly as in the cluster model
 cm = load_module("cluster_model", MODEL_PATH)
 
 
 def grid_log_q(k, labels, m=SHRINK_M):
-    """log q_g = log((k_g + m) / (k̄_c + m)), 클러스터마다 평균 0으로 다시 맞춘 값."""
+    """log q_g = log((k_g + m) / (k̄_c + m)), re-centred to mean 0 within each cluster."""
     k_bar = k.groupby(labels).transform("mean")
     log_q = np.log((k + m) / (k_bar + m))
     return log_q - log_q.groupby(labels).transform("mean")
 
 
 def sample_params(idata, n, rng):
-    """사후 표본 n개를 비복원 추출한 α (n, C), β (n, C, K)."""
+    """α (n, C) and β (n, C, K) for n posterior samples drawn without replacement."""
     alpha = cm.posterior_draws(idata, "alpha")
     beta = cm.posterior_draws(idata, "beta")
     idx = rng.choice(len(alpha), size=n, replace=False)
@@ -72,7 +74,7 @@ def sample_params(idata, n, rng):
 
 
 def grid_annual_draws(alpha, beta, labels, log_q, Z):
-    """표본별 연간 P_g = 연도 z마다 σ(η_c + log q_g)를 계산해 연도 평균. -> (표본 수, 격자 수)."""
+    """Annual P_g per sample = σ(η_c + log q_g) for every year z, averaged over the years. -> (samples, cells)."""
     eta_c = alpha[:, :, None] + np.einsum("sck,yk->scy", beta, Z)
     p = np.zeros((len(alpha), len(labels)))
     for y in range(Z.shape[0]):
@@ -81,6 +83,7 @@ def grid_annual_draws(alpha, beta, labels, log_q, Z):
 
 
 def summarize_draws(p, prefix):
+    """Mean and 5-95% quantiles over the samples, as columns named after prefix."""
     return {
         prefix: p.mean(axis=0),
         f"{prefix}_q05": np.quantile(p, 0.05, axis=0),
@@ -89,7 +92,7 @@ def summarize_draws(p, prefix):
 
 
 def risk_columns(p_annual, living_years=LIVING_YEARS):
-    """연간 확률과 거주 L년 확률 1 − (1 − P_g)^L 을 표본마다 계산한 뒤 요약."""
+    """Computes the annual probability and the L-year probability 1 − (1 − P_g)^L for every sample, then summarises them."""
     cols = summarize_draws(p_annual, "p_annual")
     for L in living_years:
         cols.update(summarize_draws(1 - (1 - p_annual) ** L, f"p_{L}yr"))
@@ -97,7 +100,7 @@ def risk_columns(p_annual, living_years=LIVING_YEARS):
 
 
 def predict_scenario(params, z):
-    """앱용: 슬라이더 z (길이 K)에 대한 격자별 확률의 평균, 5%, 95% 분위수."""
+    """For the app: mean, 5% and 95% quantiles of every cell's probability for slider values z (length K)."""
     alpha, beta = np.asarray(params["alpha"]), np.asarray(params["beta"])
     labels, log_q = np.asarray(params["cluster"]), np.asarray(params["log_q"])
     eta_c = alpha + beta @ np.asarray(z, dtype=float)
@@ -105,9 +108,10 @@ def predict_scenario(params, z):
     return p.mean(axis=0), np.quantile(p, 0.05, axis=0), np.quantile(p, 0.95, axis=0)
 
 
-# ---------------------------------------------------------------- 점검
+# ---------------------------------------------------------------- checks
 
 def q_summary(k, labels, log_q):
+    """Distribution of q_g within each cluster (min, median, max and the share between 0.8 and 1.25)."""
     q = np.exp(log_q)
     df = pd.DataFrame({"cluster": labels, "k": k, "q": q})
     out = df.groupby("cluster").agg(
@@ -119,8 +123,8 @@ def q_summary(k, labels, log_q):
 
 
 def check_against_cluster_csv(idata, z_all, n_pcs):
-    """q_g = 1, 전체 사후 표본, cluster_annual_risk.csv와 같은 연도(PC가 있는 전 연도)로 계산하면 같아야 한다.
-    전체 표본 x 전체 격자는 메모리가 커서 클러스터마다 격자 하나로 계산한다."""
+    """With q_g = 1, all posterior samples and the same years as cluster_annual_risk.csv (every year with PCs), the result must match it.
+    All samples × all cells would need too much memory, so one cell per cluster is computed."""
     ref = pd.read_csv(CLUSTER_RISK_PATH, encoding="utf-8-sig").set_index("cluster")
     alpha, beta = cm.posterior_draws(idata, "alpha"), cm.posterior_draws(idata, "beta")
     one_per_cluster = np.arange(alpha.shape[1])
@@ -131,12 +135,12 @@ def check_against_cluster_csv(idata, z_all, n_pcs):
     return float((mine[cols] - ref.loc[one_per_cluster, cols]).abs().max().max())
 
 
-# ---------------------------------------------------------------- m 선택 교차검증
+# ---------------------------------------------------------------- cross-validation for choosing m
 
 def m_cross_validation(grid, history, pcs, n_pcs):
-    """연도 하나를 빼고: 재클러스터링(예측 모델 교차검증과 같은 fold) -> 학습 연도만으로 q_g ->
-    cv_predictions.csv의 클러스터 예측(사후 평균 μ)에 log q_g를 더해 뺀 연도의 격자 침수 여부를 예측.
-    q_g = 1(클러스터 확률 그대로)도 기준선으로 함께 비교한다."""
+    """For each held-out year: re-cluster (same folds as the prediction model's cross-validation) -> q_g from the
+    training years only -> add log q_g to the cluster prediction (posterior mean μ) in cv_predictions.csv to predict
+    which cells flood in the held-out year. q_g = 1 (the cluster probability as is) is compared as a baseline."""
     clustering = load_module("grid_clustering", CLUSTERING_PATH)
     cv_pred = pd.read_csv(CV_PRED_PATH, encoding="utf-8-sig")
     cv_pred = cv_pred[cv_pred["model"] == f"hier_bernoulli_pc{n_pcs}"]
@@ -170,6 +174,7 @@ def m_cross_validation(grid, history, pcs, n_pcs):
 
 
 def main():
+    """Computes q_g, checks it against the cluster model, writes the cell flood risks and scenario parameters, and cross-validates m."""
     os.makedirs(OUT_DIR, exist_ok=True)
     pd.set_option("display.width", 250)
     rng = np.random.default_rng(SEED)

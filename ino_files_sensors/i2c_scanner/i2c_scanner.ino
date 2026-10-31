@@ -1,10 +1,11 @@
-// I2C 스캐너: 버스에 연결된 장치 주소를 모두 출력
+// I2C scanner: prints the address of every device on the bus
 #include <Wire.h>
 
+// Scans all I2C addresses once at start-up and prints the ones that answer.
 void setup() {
   Serial.begin(115200);
   Wire.begin();
-  delay(1000);  // BNO055 부팅 대기 (약 650ms 필요)
+  delay(1000);  // wait for the BNO055 to boot (needs about 650 ms)
   Serial.println("I2C 스캔 시작");
 
   int found = 0;
@@ -21,4 +22,5 @@ void setup() {
   Serial.println("스캔 끝");
 }
 
+// Nothing to do after setup().
 void loop() {}

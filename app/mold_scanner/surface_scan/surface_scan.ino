@@ -1,40 +1,40 @@
 /*
- * 표면 온습도 측정 기기 — 정이십면체 20면 IR 스캔 (데이터 수집용 펌웨어 v2)
+ * Surface temperature/humidity device - IR scan of the 20 faces of an icosahedron (data collection firmware v2)
  *
- * 하드웨어
- *   아랫단(팬) 28BYJ-48 + ULN2003 : IN1..IN4 -> D11, D10, D9, D8
- *   윗단(틸트) 28BYJ-48 + ULN2003 : IN1..IN4 -> D7, D6, D5, D4  (※ IN4를 D4로 가정)
- *   GY-906(MLX90614, 0x5A), SHT41(0x44), [선택] BNO055(0x28 또는 0x29)
- *   I2C 공유: SDA->A4, SCL->A5
+ * Hardware
+ *   lower stage (pan)  28BYJ-48 + ULN2003 : IN1..IN4 -> D11, D10, D9, D8
+ *   upper stage (tilt) 28BYJ-48 + ULN2003 : IN1..IN4 -> D7, D6, D5, D4  (assumes IN4 on D4)
+ *   GY-906 (MLX90614, 0x5A), SHT41 (0x44), [optional] BNO055 (0x28 or 0x29)
+ *   shared I2C: SDA->A4, SCL->A5
  *
- * 좌표계
- *   전원 투입 시 자세(센서 정면·수평)를 방위각 0°, 고도각 0°로 둔다.
- *   정이십면체는 꼭짓점 하나가 천정을 향한다.
- *   위 5면 +52.62°, 중간 10면 ±10.81°, 아래 5면 -52.62°, 방위각 36° 간격 10열.
+ * Coordinates
+ *   The pose at power-on (sensor facing forward, level) is azimuth 0°, elevation 0°.
+ *   The icosahedron has one vertex pointing at the zenith.
+ *   5 upper faces at +52.62°, 10 middle faces at ±10.81°, 5 lower faces at -52.62°, in 10 columns 36° apart.
  *
- * 시리얼 프로토콜 (115200bps, 한 줄 단위)
- *   '#'로 시작하는 줄은 메타 정보, 그 외는 데이터 행이다.
- *   #HDR,<열 이름들>                 데이터 열 정의 (시작 시 1회)
- *   #SESSION,heading_deg,<값>,mag_calib,<0-3>,sys_calib,<0-3>
- *                                     기기 방위각 (BNO055 사용 시, 모터 통전 전에 측정)
+ * Serial protocol (115200 bps, one message per line)
+ *   Lines starting with '#' are meta information, all others are data rows.
+ *   #HDR,<column names>              data column definition (once at start)
+ *   #SESSION,heading_deg,<value>,mag_calib,<0-3>,sys_calib,<0-3>
+ *                                     device heading (with a BNO055, measured before the motors are powered)
  *   #SCAN_BEGIN,<scan_id>
  *   <scan_id>,,<face>,<zone>,<az>,<el>,<t_surf>,<t_surf_sd>,<t_air>,<rh>,<t_sensor>   x 20
  *   #SCAN_END,<scan_id>
- *   #ABORT,<scan_id>                  스캔 중단 시 (데이터 행 없음)
- *   #INFO,<메시지>                     사람이 읽는 안내
- *   데이터 행의 timestamp 열은 비워 두며, PC 로거가 채운다.
+ *   #ABORT,<scan_id>                  when a scan is stopped (no data rows)
+ *   #INFO,<message>                   human-readable notes
+ *   The timestamp column of the data rows is left empty; the PC logger fills it in.
  *
- * 시리얼 명령
- *   전원을 켜면 모터를 움직이지 않고 대기한다 (#INFO,ready 출력).
- *   n : 스캔 1회 (끝나면 원위치로 돌아와 다시 대기)
- *   s : 스캔 중 즉시 정지 -> 원위치 -> 대기
- *   반복 측정이 필요하면 PC 로거가 정해진 간격으로 n을 보낸다.
+ * Serial commands
+ *   At power-on the device waits without moving the motors (prints #INFO,ready).
+ *   n : one scan (then returns home and waits again)
+ *   s : stop the scan at once -> return home -> wait
+ *   For repeated measurements the PC logger sends n at the chosen interval.
  *
- * 백래시 보정: 모든 목표 위치에 +방향으로만 접근 (틸트 +는 위쪽).
- * 처짐 방지: 스캔 중 틸트 코일 전류를 계속 유지하고, 스캔 시작마다 틸트 0°를 다시 맞춘다.
- * 측정: 이동 후 2 s 대기, 약 1 s 동안 10회 읽어 평균. 스캔 1회 약 1분 반.
+ * Backlash: every target position is approached from the + direction only (tilt + is up).
+ * Sag: the tilt coils stay powered during a scan, and tilt 0° is set again at the start of each scan.
+ * Measurement: 2 s wait after each move, then 10 readings over about 1 s, averaged. One scan takes about 1.5 minutes.
  *
- * 라이브러리: Adafruit MLX90614, Adafruit SHT4x, [선택] Adafruit BNO055
+ * Libraries: Adafruit MLX90614, Adafruit SHT4x, [optional] Adafruit BNO055
  */
 
 #include <Wire.h>
@@ -42,103 +42,112 @@
 #include <Adafruit_MLX90614.h>
 #include <Adafruit_SHT4x.h>
 
-#define USE_BNO055 0                   // BNO055를 달았으면 1로 바꾼다
+#define USE_BNO055 0                   // set to 1 if a BNO055 is fitted
 
 #if USE_BNO055
 #include <Adafruit_BNO055.h>
 #endif
 
-// ---------------- 설정 ----------------
+// ---------------- settings ----------------
 const uint8_t PAN_PINS[4]  = {11, 10, 9, 8};
 const uint8_t TILT_PINS[4] = {7, 6, 5, 4};
 
-const float STEPS_PER_REV = 4096.0;    // 28BYJ-48 하프스텝 기준(실측 4076 근처일 수 있음)
-const int   PAN_DIR  = 1;              // 회전 방향이 반대면 -1
-const int   TILT_DIR = 1;              // +각도가 위를 보지 않으면 -1
-const long  BACKLASH_OVERSHOOT = 80;   // 백래시보다 충분히 큰 값(스텝)
-const unsigned int  STEP_US   = 1200;  // 스텝 간격(us)
-// IR 측정 시간: MLX90614 기본 필터의 안정 시간은 약 0.85 s (Melexis 필터 앱노트).
-// 그 2배 이상을 기다린 뒤 약 1 s에 걸쳐 10회 읽어 평균한다.
-const unsigned long SETTLE_MS = 2000;  // 이동 후 대기 (진동 감쇠 + 필터 안정)
-const int   N_SAMPLES = 10;            // IR 평균 횟수
-const unsigned long SAMPLE_INTERVAL_MS = 100; // 읽기 간격
-// 틸트 처짐 방지: 스캔 중에는 틸트 코일 전류를 유지한다.
-// 원위치에서 대기할 때도 유지하려면 true (모터가 계속 따뜻해지고, IR 센서에 열이 전해질 수 있음).
+const float STEPS_PER_REV = 4096.0;    // 28BYJ-48 in half steps (may measure closer to 4076)
+const int   PAN_DIR  = 1;              // -1 if it turns the wrong way
+const int   TILT_DIR = 1;              // -1 if a + angle does not look up
+const long  BACKLASH_OVERSHOOT = 80;   // comfortably larger than the backlash (steps)
+const unsigned int  STEP_US   = 1200;  // time between steps (us)
+// IR timing: the MLX90614's default filter settles in about 0.85 s (Melexis filter application note).
+// Wait more than twice that, then average 10 readings over about 1 s.
+const unsigned long SETTLE_MS = 2000;  // wait after a move (vibration dies down + filter settles)
+const int   N_SAMPLES = 10;            // number of IR readings averaged
+const unsigned long SAMPLE_INTERVAL_MS = 100; // time between readings
+// Against tilt sag the tilt coils stay powered during a scan.
+// true keeps them powered while waiting at home too (the motor keeps warming up and may heat the IR sensor).
 const bool  HOLD_TILT_WHEN_IDLE = false;
-const bool  COL0_UPPER = true;         // 방위각 0° 열이 위쪽 2면이면 true
+const bool  COL0_UPPER = true;         // true if the azimuth 0° column holds the two upper faces
 
 #if USE_BNO055
-const uint8_t BNO_ADDR = 0x28;         // I2C 스캐너 결과가 0x29면 바꾼다
-const unsigned long BNO_CALIB_TIMEOUT_MS = 60000UL; // 지자기 보정 대기 최대 시간
+const uint8_t BNO_ADDR = 0x28;         // change if the I2C scanner reports 0x29
+const unsigned long BNO_CALIB_TIMEOUT_MS = 60000UL; // longest wait for the magnetometer calibration
 #endif
 
-// ---------------- 센서 ----------------
+// ---------------- sensors ----------------
 Adafruit_MLX90614 mlx;
 Adafruit_SHT4x    sht4;
 #if USE_BNO055
 Adafruit_BNO055 bno(55, BNO_ADDR);
 #endif
 
-// ---------------- 상태 ----------------
+// ---------------- state ----------------
 volatile bool stopReq = false;
-bool aligned = false;                  // 백래시 정렬을 했는지
+bool aligned = false;                  // whether the backlash has been taken up
 bool scanning = false;
 bool scanNowReq = false;
-unsigned long scanCount = 0;           // scan_id (전원을 켤 때마다 1부터)
+unsigned long scanCount = 0;           // scan_id (starts at 1 at every power-on)
 
+// Reads serial commands: s stops a running scan, n requests a scan when idle.
 void pollSerial() {
   while (Serial.available()) {
     char c = Serial.read();
     if ((c == 's' || c == 'S') && scanning) stopReq = true;
-    else if ((c == 'n' || c == 'N') && !scanning) scanNowReq = true;  // 스캔 중의 n은 무시
+    else if ((c == 'n' || c == 'N') && !scanning) scanNowReq = true;  // n is ignored during a scan
   }
 }
 
-// ---------------- 스테퍼 ----------------
+// ---------------- stepper ----------------
 const uint8_t SEQ[8][4] = {
   {1,0,0,0},{1,1,0,0},{0,1,0,0},{0,1,1,0},
   {0,0,1,0},{0,0,1,1},{0,0,0,1},{1,0,0,1}
 };
 
+// One 28BYJ-48 stepper on a ULN2003 driver; the position is counted in half steps.
 struct Stepper28 {
   const uint8_t* pins;
   int    dir;
   long   pos;
   int8_t phase;
 
+  // Sets the pins as outputs, zeroes the position and switches the coils off.
   void begin() {
     for (int k = 0; k < 4; k++) pinMode(pins[k], OUTPUT);
     pos = 0; phase = 0;
     release();
   }
+  // Drives the coils for the current phase.
   void writePhase() {
     for (int k = 0; k < 4; k++) digitalWrite(pins[k], SEQ[phase][k]);
   }
+  // Moves one half step in direction s (+1 or -1).
   void stepOnce(int s) {
     phase = (phase + s * dir + 8) % 8;
     writePhase();
     pos += s;
     delayMicroseconds(STEP_US);
   }
+  // Steps straight to target, checking for serial commands on the way.
   void moveRaw(long target) {
     while (pos != target) {
       stepOnce(target > pos ? 1 : -1);
       pollSerial();
     }
   }
-  void moveTo(long target) {           // 항상 +방향으로 도달 (백래시 제거)
+  void moveTo(long target) {           // Moves to target, always arriving from the + direction (removes backlash).
     if (target < pos) moveRaw(target - BACKLASH_OVERSHOOT);
     moveRaw(target);
   }
+  // Moves to an angle in degrees.
   void moveToDeg(float deg) {
     moveTo(lround(deg / 360.0 * STEPS_PER_REV));
   }
+  // Goes below 0 and back to 0 so the gears are engaged in the + direction.
   void takeUpBacklash() {
     writePhase();
     delay(5);
     moveRaw(-BACKLASH_OVERSHOOT);
     moveRaw(0);
   }
+  // Switches all coils off.
   void release() {
     for (int k = 0; k < 4; k++) digitalWrite(pins[k], LOW);
   }
@@ -147,12 +156,13 @@ struct Stepper28 {
 Stepper28 pan  = {PAN_PINS,  PAN_DIR,  0, 0};
 Stepper28 tilt = {TILT_PINS, TILT_DIR, 0, 0};
 
-// ---------------- 면 목록 ----------------
+// ---------------- face list ----------------
 const int N_FACES = 20;
 float faceAz[N_FACES], faceEl[N_FACES];
 char  faceZone[N_FACES];
 float faceT[N_FACES], faceSD[N_FACES], faceTs[N_FACES];
 
+// Fills in the azimuth, elevation and zone of the 20 faces in scan order.
 void buildFaces() {
   const float E_MID = atan((3.0 - sqrt(5.0)) / 4.0) * 180.0 / PI;  // 10.812°
   const float E_CAP = atan((3.0 + sqrt(5.0)) / 4.0) * 180.0 / PI;  // 52.623°
@@ -160,7 +170,7 @@ void buildFaces() {
   for (int j = 0; j < 10; j++) {
     float az = 36.0 * j;
     bool upper = (j % 2 == 0) ? COL0_UPPER : !COL0_UPPER;
-    if (upper) {                       // 아래 -> 위 순서
+    if (upper) {                       // bottom -> top
       faceAz[n] = az; faceEl[n] =  E_MID; faceZone[n++] = 'M';
       faceAz[n] = az; faceEl[n] =  E_CAP; faceZone[n++] = 'T';
     } else {
@@ -170,8 +180,8 @@ void buildFaces() {
   }
 }
 
-// ---------------- 측정 ----------------
-// IR 물체 온도 평균·표준편차와 센서 자체 온도 평균
+// ---------------- measurement ----------------
+// Mean and standard deviation of the IR object temperature, and the mean temperature of the sensor itself.
 void readIR(float &mean, float &sd, float &ts) {
   float s = 0, s2 = 0, sa = 0;
   for (int i = 0; i < N_SAMPLES; i++) {
@@ -187,25 +197,28 @@ void readIR(float &mean, float &sd, float &ts) {
   ts   = sa / N_SAMPLES;
 }
 
+// Returns to azimuth 0°, elevation 0° and switches off the coils that do not need to stay powered.
 void goHome() {
-  tilt.moveToDeg(0);                   // 틸트는 전류를 유지한 채 이동
-  pan.moveToDeg(0);                    // 역방향으로 돌아와 케이블 꼬임 방지
+  tilt.moveToDeg(0);                   // tilt moves with its coils kept powered
+  pan.moveToDeg(0);                    // turns back the way it came so the cable does not twist
   pan.release();
   if (!HOLD_TILT_WHEN_IDLE) tilt.release();
 }
 
+// Prints the data column definition.
 void printHeader() {
   Serial.println(F("#HDR,scan_id,timestamp,face,zone,az_deg,el_deg,t_surf_c,t_surf_sd_c,t_air_c,rh_pct,t_sensor_c"));
 }
 
+// Measures all 20 faces, returns home and prints the scan; prints #ABORT if stopped.
 void runScan() {
-  if (!aligned) {                      // 첫 스캔 직전에 한 번만 팬 기어 유격 정렬
+  if (!aligned) {                      // take up the pan gear play once, before the first scan
     pan.takeUpBacklash();
     pan.release();
     aligned = true;
   }
-  // 틸트는 대기 중 전류가 꺼져 처졌을 수 있으므로 스캔마다 아래에서 0°로 다시 올려 맞춘다.
-  // 이후 스캔이 끝날 때까지 틸트 전류를 유지한다.
+  // The tilt may have sagged while its coils were off, so every scan raises it to 0° again from below.
+  // From then on the tilt coils stay powered until the scan ends.
   tilt.takeUpBacklash();
   scanning = true;
   stopReq = false;
@@ -217,7 +230,7 @@ void runScan() {
     if (stopReq) break;
     tilt.moveToDeg(faceEl[i]);
     if (stopReq) break;
-    pan.release();                     // 팬(수직축)은 중력 부하가 없어 전류를 끈다. 틸트는 유지
+    pan.release();                     // pan (vertical axis) carries no gravity load, so its coils go off; tilt stays powered
     delay(SETTLE_MS);
     readIR(faceT[i], faceSD[i], faceTs[i]);
     if (stopReq) break;
@@ -256,7 +269,7 @@ void runScan() {
 }
 
 #if USE_BNO055
-// 모터 통전 전에 방위각을 잰다. 지자기 보정이 3이 될 때까지(최대 TIMEOUT) 기다린 뒤 20회 원형 평균.
+// Measures the heading before the motors are powered: waits for magnetometer calibration 3 (up to the timeout), then takes the circular mean of 20 readings.
 void measureHeading() {
   if (!bno.begin()) {
     Serial.println(F("#INFO,BNO055 not found. check address"));
@@ -272,7 +285,7 @@ void measureHeading() {
     if (mag == 3) break;
     delay(200);
   }
-  delay(2000);                         // 내려놓은 뒤 안정 대기
+  delay(2000);                         // let it settle after being put down
   float sx = 0, cy = 0;
   for (int i = 0; i < 20; i++) {
     sensors_event_t ev;
@@ -290,11 +303,12 @@ void measureHeading() {
 }
 #endif
 
+// Starts the sensors, builds the face list, measures the heading if enabled, and reports ready.
 void setup() {
   Serial.begin(115200);
   Wire.begin();
 
-  pan.begin();                         // 핀만 설정, 코일 전류 없음
+  pan.begin();                         // pins only, coils stay off
   tilt.begin();
 
   if (!mlx.begin()) { Serial.println(F("#INFO,ERROR MLX90614 not found")); while (1); }
@@ -306,13 +320,14 @@ void setup() {
   printHeader();
 
 #if USE_BNO055
-  measureHeading();                    // 모터 통전 전에 측정
+  measureHeading();                    // measured before the motors are powered
 #endif
 
-  // 모터는 움직이지 않고 n을 기다린다
+  // the motors do not move; wait for n
   Serial.println(F("#INFO,ready"));
 }
 
+// Checks for commands and runs a scan when one is requested.
 void loop() {
   pollSerial();
   if (scanNowReq) {

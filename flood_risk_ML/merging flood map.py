@@ -1,13 +1,13 @@
 """
-서울시 침수흔적도(연도별 shapefile, 2010~2025)를 공통 스키마로 맞춰
-하나의 shapefile(merged flood map/서울시_침수흔적도_2010_2025.shp)로 합치는 스크립트.
+Brings the Seoul flood trace maps (one shapefile per year, 2010-2025) to a common schema and merges them into a
+single shapefile (merged flood map/서울시_침수흔적도_2010_2025.shp).
 
-- YEAR는 폴더 연도를 기준으로 한다 (원본 F_YR는 일부 오기가 있어 참고용으로만 보존).
-- GU_NAM은 ADM_CD 앞 5자리(시군구 코드)로 다시 채워 표기를 통일한다.
-- 2022년은 서울시 공식 레이어를 모두 유지하고, 재난지원금 레이어 중
-  서울시 폴리곤과 겹치는 것은 제거한다.
+- YEAR comes from the folder year (the source F_YR has some typos and is kept for reference only).
+- GU_NAM is filled in again from the first 5 digits of ADM_CD (the district code) so the spelling is consistent.
+- For 2022 every polygon of the official Seoul layer is kept, and polygons of the disaster relief layer that overlap
+  a Seoul polygon are removed.
 
-실행:
+Run:
     & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "merging flood map.py"
 """
 import glob
@@ -30,7 +30,7 @@ STR_COLS = [
 NUM_COLS = ["F_SHIM", "F_AREA", "F_AVR_HGT"]
 OUT_COLS = ["YEAR"] + NUM_COLS + STR_COLS
 
-# 서울시 시군구 코드(ADM_CD 앞 5자리) -> 구 이름
+# Seoul district code (first 5 digits of ADM_CD) -> district name
 GU_CODES = {
     "11110": "종로구", "11140": "중구", "11170": "용산구", "11200": "성동구",
     "11215": "광진구", "11230": "동대문구", "11260": "중랑구", "11290": "성북구",
@@ -45,7 +45,7 @@ SEOUL_LAYER_2022 = "서울시_2022(최종)"
 
 
 def find_year_shapefiles():
-    """연도 폴더(YYYY년 침수흔적도)를 순회하며 (year, shp_path) 목록을 반환."""
+    """Walks the year folders (YYYY년 침수흔적도) and returns a list of (year, shp_path)."""
     pairs = []
     for entry in sorted(os.listdir(SRC_DIR)):
         m = re.match(r"^(\d{4})년\s*침수흔적도$", entry)
@@ -63,7 +63,7 @@ def find_year_shapefiles():
 
 
 def read_shp(shp_path):
-    """.cpg가 없는 구버전(2010~2020) 파일은 cp949로 읽는다."""
+    """Reads a shapefile; older files without a .cpg (2010-2020) are read as cp949."""
     has_cpg = os.path.exists(os.path.splitext(shp_path)[0] + ".cpg")
     gdf = gpd.read_file(shp_path) if has_cpg else gpd.read_file(shp_path, encoding="cp949")
     if gdf.crs is None:
@@ -74,7 +74,7 @@ def read_shp(shp_path):
 
 
 def normalize_adm_cd(value):
-    """'1111017400', 1.1110174e9 등 다양한 형태를 10자리 문자열로 통일."""
+    """Turns the many forms such as '1111017400' or 1.1110174e9 into one 10-digit string."""
     if pd.isna(value) or str(value).strip() == "":
         return None
     try:
@@ -84,6 +84,7 @@ def normalize_adm_cd(value):
 
 
 def to_str(series):
+    """Strips values and turns empty or missing ones into None."""
     return series.map(lambda v: None if pd.isna(v) or str(v).strip() == "" else str(v).strip())
 
 
@@ -100,7 +101,7 @@ def parse_2025_datetime(gdf):
 
 
 def to_common_schema(year, gdf):
-    """연도별 원본을 공통 스키마(OUT_COLS)로 맞춘다."""
+    """Brings one year's source data to the common schema (OUT_COLS)."""
     df = pd.DataFrame(index=gdf.index)
     df["YEAR"] = year
     for col in NUM_COLS:
@@ -119,7 +120,7 @@ def to_common_schema(year, gdf):
         df["F_SAT_YMD"], df["F_SAT_TM"] = parse_2025_datetime(gdf)
 
     for col in ("F_SAT_YMD", "F_END_YMD"):
-        # '2022-08-08' -> '20220808', '20220808  2100'(날짜+시각) -> '20220808'
+        # '2022-08-08' -> '20220808', '20220808  2100' (date + time) -> '20220808'
         df[col] = df[col].map(lambda v: v.split()[0].replace("-", "") if isinstance(v, str) else v)
 
     df["ADM_CD"] = gdf["ADM_CD"].map(normalize_adm_cd)
@@ -127,7 +128,7 @@ def to_common_schema(year, gdf):
 
     out = gpd.GeoDataFrame(df[OUT_COLS], geometry=gdf.geometry.values, crs=SOURCE_CRS)
 
-    # 유효하지 않은/빈 geometry 정리
+    # clean up invalid/empty geometries
     out = out[~out.geometry.is_empty & out.geometry.notna()].copy()
     invalid = ~out.geometry.is_valid
     if invalid.any():
@@ -139,7 +140,7 @@ def to_common_schema(year, gdf):
 
 
 def drop_2022_overlaps(gdf):
-    """2022 재난지원금 폴리곤 중 서울시 폴리곤과 면적이 겹치는 것을 제거."""
+    """Removes the 2022 disaster relief polygons whose area overlaps a Seoul polygon."""
     seoul = gdf[gdf["SRC"] == "서울시"]
     disaster = gdf[gdf["SRC"] == "재난지원금"]
 
@@ -158,6 +159,7 @@ def drop_2022_overlaps(gdf):
 
 
 def main():
+    """Loads every year's shapefile, brings it to the common schema, merges them and saves the result."""
     year_shp_pairs = find_year_shapefiles()
     print(f"연도별 shapefile {len(year_shp_pairs)}개 발견: {[y for y, _ in year_shp_pairs]}")
 

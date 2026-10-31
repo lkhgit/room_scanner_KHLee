@@ -1,27 +1,28 @@
 // ============================================================
-//  팬·틸트 리그 모터 제어 + 방위 센서 (Arduino UNO + ULN2003 x2 + 28BYJ-48 x2 + GY-BNO055)
-//  - 아랫단(팬)  IN1~IN4 -> D8, D9, D10, D11
-//  - 윗단(틸트) IN1~IN4 -> D4, D5, D6, D7
-//  - GY-BNO055   VIN -> 5V, GND -> GND, SDA -> A4, SCL -> A5   (I2C 주소 0x29, 없으면 0x28 탐색)
-//    라이브러리 설치 필요 없음 (Wire, EEPROM만 사용)
-//    부팅할 때 bno055_compass.ino(ino_files_sensors/compass_sensor_calibration)가 EEPROM에 저장한 지자기 보정값을 불러와 센서에 넣는다.
-//      (EEPROM 0~3: 확인용 값 0xB0055C01, 4~25: 보정 레지스터 0x55~0x6A 22바이트)
-//    이 스케치는 EEPROM에 아무것도 쓰지 않으므로, 다른 스케치를 올려도 보정값은 그대로 남는다.
+//  Pan-tilt rig motor control + compass sensor (Arduino UNO + ULN2003 x2 + 28BYJ-48 x2 + GY-BNO055)
+//  - lower stage (pan)  IN1-IN4 -> D8, D9, D10, D11
+//  - upper stage (tilt) IN1-IN4 -> D4, D5, D6, D7
+//  - GY-BNO055   VIN -> 5V, GND -> GND, SDA -> A4, SCL -> A5   (I2C address 0x29, tries 0x28 if not found)
+//    no libraries to install (uses only Wire and EEPROM)
+//    At boot it loads the magnetometer calibration that bno055_compass.ino (ino_files_sensors/compass_sensor_calibration)
+//    saved in EEPROM and writes it to the sensor.
+//      (EEPROM 0-3: check value 0xB0055C01, 4-25: the 22 bytes of calibration registers 0x55-0x6A)
+//    This sketch never writes to EEPROM, so the calibration survives uploading other sketches.
 //
-//  시리얼 명령 (115200 baud, 줄바꿈 '\n'으로 끝):
-//    P <n>   팬 모터를 n 하프스텝 상대 이동 (음수 = 역방향)
-//    T <n>   틸트 모터를 n 하프스텝 상대 이동
-//    S <us>  하프스텝 간 지연(µs) 설정 (800~10000)
-//    H <0|1> 이동 후 코일 유지 여부 (0 = 이동 후 전류 차단, 기본값)
-//    R       두 모터 모두 전류 차단
-//    N       방위 센서 값 1회 -> "N mx my mz ax ay az eh cal"
-//              mx~mz: 자기장 (1/16 µT), ax~az: 가속도 (1/100 m/s², 가만히 있으면 위쪽을 가리킴)
-//              eh: 센서 자체 heading (1/16°, 자북 기준)
-//              cal: 보정 상태 바이트 (sys<<6 | gyro<<4 | accel<<2 | mag, 각 0~3)
-//            센서가 없으면 "ERR imu"
-//    I       센서 상태 -> "I <주소> <보정값 불러옴 0|1>"  (센서가 없으면 "ERR imu")
-//    ?       핑 -> "READY"
-//  이동이 끝나면 "OK", 잘못된 명령이면 "ERR"을 보냄.
+//  Serial commands (115200 baud, ending with a newline '\n'):
+//    P <n>   move the pan motor by n half steps (negative = backwards)
+//    T <n>   move the tilt motor by n half steps
+//    S <us>  set the delay between half steps (µs, 800-10000)
+//    H <0|1> keep the coils powered after a move (0 = power off after a move, the default)
+//    R       power off both motors
+//    N       one compass reading -> "N mx my mz ax ay az eh cal"
+//              mx-mz: magnetic field (1/16 µT), ax-az: acceleration (1/100 m/s², points up when at rest)
+//              eh: the sensor's own heading (1/16°, from magnetic north)
+//              cal: calibration status byte (sys<<6 | gyro<<4 | accel<<2 | mag, each 0-3)
+//            "ERR imu" if there is no sensor
+//    I       sensor status -> "I <address> <calibration loaded 0|1>"  ("ERR imu" if there is no sensor)
+//    ?       ping -> "READY"
+//  Sends "OK" when a move is done and "ERR" for an unknown command.
 // ============================================================
 #include <Wire.h>
 #include <EEPROM.h>
@@ -29,7 +30,7 @@
 const uint8_t PAN_PINS[4]  = {8, 9, 10, 11};
 const uint8_t TILT_PINS[4] = {4, 5, 6, 7};
 
-// 하프스텝 시퀀스 (IN1, IN2, IN3, IN4)
+// half-step sequence (IN1, IN2, IN3, IN4)
 const uint8_t SEQ[8][4] = {
   {1,0,0,0}, {1,1,0,0}, {0,1,0,0}, {0,1,1,0},
   {0,0,1,0}, {0,0,1,1}, {0,0,0,1}, {1,0,0,1}
@@ -37,38 +38,39 @@ const uint8_t SEQ[8][4] = {
 
 int8_t panPhase = 0;
 int8_t tiltPhase = 0;
-unsigned int stepDelayUs = 1500;   // 정속 구간 하프스텝 간격
-bool holdTorque = false;           // 발열을 줄이기 위해 기본은 이동 후 전류 차단
+unsigned int stepDelayUs = 1500;   // half-step interval at cruising speed
+bool holdTorque = false;           // by default the coils go off after a move to reduce heat
 
-const long RAMP_STEPS = 120;       // 가감속 구간 길이 (하프스텝)
-const unsigned int RAMP_EXTRA_US = 18;  // 가감속 구간에서 스텝당 추가 지연
+const long RAMP_STEPS = 120;       // length of the acceleration/deceleration ramp (half steps)
+const unsigned int RAMP_EXTRA_US = 18;  // extra delay per step within the ramp
 
 String lineBuf;
 
 // ---------------- BNO055 ----------------
-const uint8_t BNO_CHIP_ID   = 0x00;   // 0xA0이어야 함
+const uint8_t BNO_CHIP_ID   = 0x00;   // must read 0xA0
 const uint8_t BNO_PAGE_ID   = 0x07;
-const uint8_t BNO_ACC_X     = 0x08;   // 가속도 X,Y,Z (LSB 먼저)
-const uint8_t BNO_MAG_X     = 0x0E;   // 자기장 X,Y,Z
+const uint8_t BNO_ACC_X     = 0x08;   // acceleration X,Y,Z (LSB first)
+const uint8_t BNO_MAG_X     = 0x0E;   // magnetic field X,Y,Z
 const uint8_t BNO_EUL_H     = 0x1A;   // Euler heading
-const uint8_t BNO_OFFSETS   = 0x55;   // 보정 레지스터 시작 (22바이트)
+const uint8_t BNO_OFFSETS   = 0x55;   // start of the calibration registers (22 bytes)
 const uint8_t BNO_CALIB     = 0x35;
 const uint8_t BNO_UNIT_SEL  = 0x3B;
 const uint8_t BNO_OPR_MODE  = 0x3D;
 const uint8_t BNO_PWR_MODE  = 0x3E;
 const uint8_t BNO_SYS_TRIG  = 0x3F;
 const uint8_t MODE_CONFIG   = 0x00;
-const uint8_t MODE_COMPASS  = 0x09;   // 가속도+지자기 (보정할 때와 같은 모드)
+const uint8_t MODE_COMPASS  = 0x09;   // accelerometer + magnetometer (the same mode as during calibration)
 
-// bno055_compass.ino 와 같은 저장 형식
+// same storage format as bno055_compass.ino
 const uint32_t CALIB_MAGIC     = 0xB0055C01UL;
 const int      CALIB_ADDR_MAGIC = 0;
 const int      CALIB_ADDR_DATA  = 4;
 const uint8_t  CALIB_LEN        = 22;
 
-uint8_t bnoAddr = 0;                  // 0이면 센서 없음
+uint8_t bnoAddr = 0;                  // 0 = no sensor
 bool calibLoaded = false;
 
+// Writes one BNO055 register; returns false on an I2C error.
 bool bnoWrite(uint8_t reg, uint8_t val) {
   Wire.beginTransmission(bnoAddr);
   Wire.write(reg);
@@ -76,6 +78,7 @@ bool bnoWrite(uint8_t reg, uint8_t val) {
   return Wire.endTransmission() == 0;
 }
 
+// Reads n bytes starting at a BNO055 register; returns false on an I2C error.
 bool bnoRead(uint8_t reg, uint8_t *buf, uint8_t n) {
   Wire.beginTransmission(bnoAddr);
   Wire.write(reg);
@@ -85,10 +88,11 @@ bool bnoRead(uint8_t reg, uint8_t *buf, uint8_t n) {
   return true;
 }
 
+// Looks for a BNO055 at addr by reading its chip id, retrying for about a second after power-up.
 bool bnoProbe(uint8_t addr) {
   bnoAddr = addr;
   uint8_t id = 0;
-  for (uint8_t tries = 0; tries < 10; tries++) {     // 전원 직후에는 응답까지 시간이 걸림
+  for (uint8_t tries = 0; tries < 10; tries++) {     // right after power-up it takes a while to answer
     if (bnoRead(BNO_CHIP_ID, &id, 1) && id == 0xA0) return true;
     delay(100);
   }
@@ -96,7 +100,7 @@ bool bnoProbe(uint8_t addr) {
   return false;
 }
 
-// EEPROM에 저장된 보정값을 센서에 넣음 (CONFIG 모드에서만 쓸 수 있음)
+// Writes the calibration saved in EEPROM to the sensor (only possible in CONFIG mode).
 bool loadCalib() {
   uint32_t magic;
   EEPROM.get(CALIB_ADDR_MAGIC, magic);
@@ -107,23 +111,26 @@ bool loadCalib() {
   return true;
 }
 
+// Finds the BNO055, loads the saved calibration and switches it to compass mode.
 void bnoInit() {
   Wire.begin();
 #if defined(WIRE_HAS_TIMEOUT)
-  Wire.setWireTimeout(3000, true);                   // 센서가 빠져도 멈추지 않게
+  Wire.setWireTimeout(3000, true);                   // so a disconnected sensor does not hang the board
 #endif
   if (!bnoProbe(0x29) && !bnoProbe(0x28)) return;
   bnoWrite(BNO_OPR_MODE, MODE_CONFIG); delay(25);
   bnoWrite(BNO_PAGE_ID, 0);
   bnoWrite(BNO_PWR_MODE, 0x00);       delay(10);     // normal
-  bnoWrite(BNO_SYS_TRIG, 0x80);       delay(10);     // 외부 32.768kHz 크리스털 사용 (보정할 때와 동일)
-  bnoWrite(BNO_UNIT_SEL, 0x80);       delay(10);     // m/s², 도(°)
+  bnoWrite(BNO_SYS_TRIG, 0x80);       delay(10);     // use the external 32.768 kHz crystal (same as during calibration)
+  bnoWrite(BNO_UNIT_SEL, 0x80);       delay(10);     // m/s², degrees
   calibLoaded = loadCalib();          delay(10);
   bnoWrite(BNO_OPR_MODE, MODE_COMPASS); delay(30);
 }
 
+// Combines two little-endian bytes into a signed 16-bit value.
 int16_t le16(const uint8_t *b) { return (int16_t)((uint16_t)b[0] | ((uint16_t)b[1] << 8)); }
 
+// Sends one compass reading as "N mx my mz ax ay az eh cal", or "ERR imu".
 void sendImu() {
   uint8_t mag[6], grv[6], eul[2], cal;
   if (!bnoAddr || !bnoRead(BNO_MAG_X, mag, 6) || !bnoRead(BNO_ACC_X, grv, 6) ||
@@ -138,28 +145,31 @@ void sendImu() {
   Serial.print(' '); Serial.println(cal);
 }
 
-// ---------------- 모터 ----------------
+// ---------------- motors ----------------
+// Drives a motor's four coils for one step of the sequence.
 void writeCoils(const uint8_t* pins, int8_t phase) {
   for (uint8_t i = 0; i < 4; i++) digitalWrite(pins[i], SEQ[phase][i]);
 }
 
+// Switches a motor's coils off.
 void releaseCoils(const uint8_t* pins) {
   for (uint8_t i = 0; i < 4; i++) digitalWrite(pins[i], LOW);
 }
 
+// Moves a motor by the given number of half steps, slower at the start and end.
 void moveMotor(const uint8_t* pins, int8_t &phase, long steps) {
   if (steps == 0) return;
   int8_t dir = (steps > 0) ? 1 : -1;
   long n = labs(steps);
 
-  writeCoils(pins, phase);   // 현재 상(phase)을 먼저 잡아서 첫 스텝이 튀지 않게
+  writeCoils(pins, phase);   // hold the current phase first so the first step does not jump
   delay(5);
 
   for (long i = 0; i < n; i++) {
     phase = (phase + dir + 8) % 8;
     writeCoils(pins, phase);
 
-    // 시작·끝 부분은 천천히 (탈조 방지)
+    // slow at the start and end (keeps the motor from skipping steps)
     long fromEdge = min(i, n - 1 - i);
     unsigned int d = stepDelayUs;
     if (fromEdge < RAMP_STEPS) d += (unsigned int)(RAMP_STEPS - fromEdge) * RAMP_EXTRA_US;
@@ -170,6 +180,7 @@ void moveMotor(const uint8_t* pins, int8_t &phase, long steps) {
   if (!holdTorque) releaseCoils(pins);
 }
 
+// Runs one serial command (P, T, S, H, R, N, I or ?).
 void handleLine(String line) {
   line.trim();
   if (line.length() == 0) return;
@@ -198,6 +209,7 @@ void handleLine(String line) {
   }
 }
 
+// Sets up the motor pins, the serial port and the compass sensor, then reports READY.
 void setup() {
   for (uint8_t i = 0; i < 4; i++) {
     pinMode(PAN_PINS[i], OUTPUT);
@@ -211,6 +223,7 @@ void setup() {
   Serial.println("READY");
 }
 
+// Collects serial characters into lines and handles each complete line.
 void loop() {
   while (Serial.available()) {
     char c = Serial.read();

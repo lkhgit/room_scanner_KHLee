@@ -23,6 +23,7 @@ IMG_EXT = ("jpg", "jpeg", "png")
 
 class BundleError(Exception):
     def __init__(self, problems):
+        """Keeps the list of problems and joins them into the exception message."""
         self.problems = list(problems)
         super().__init__("; ".join(self.problems))
 
@@ -48,6 +49,7 @@ def _decode(info: zipfile.ZipInfo) -> str:
 
 
 def _members(zf: zipfile.ZipFile) -> dict:
+    """Maps each file in the zip to its cleaned-up path parts, skipping folders, system files and unsafe paths."""
     out = {}
     for info in zf.infolist():
         if info.is_dir():
@@ -60,6 +62,7 @@ def _members(zf: zipfile.ZipFile) -> dict:
 
 
 def _find_root(members):
+    """Finds the folder that holds manifest.json (the top level or one wrapping folder)."""
     for parts in members:
         if parts[-1].lower() == "manifest.json" and len(parts) <= 2:
             return parts[:-1]
@@ -84,6 +87,7 @@ def inspect(zip_path):
         lower = {tuple(p.lower() for p in k): k for k in names}
 
         def find(filename):
+            """Finds a file in the bundle by name, ignoring case and folder."""
             return next((k for lk, k in lower.items() if lk[-1] == filename), None)
 
         manifest = {}
@@ -169,6 +173,7 @@ def inspect(zip_path):
 
 
 def _copy(zf, info, target):
+    """Copies one zip member to a file on disk."""
     target.parent.mkdir(parents=True, exist_ok=True)
     with zf.open(info) as src, open(target, "wb") as out:
         shutil.copyfileobj(src, out)
@@ -182,6 +187,7 @@ def extract(zip_path, layout, dest):
         names = {k[len(root):]: v for k, v in _members(zf).items() if k[:len(root)] == root}
 
         def put(key, target):
+            """Copies one bundle file to its normalized name under dest."""
             _copy(zf, names[tuple(key)], dest / target)
 
         _copy(zf, next(v for k, v in names.items() if k[-1].lower() == "manifest.json"), dest / "manifest.json")

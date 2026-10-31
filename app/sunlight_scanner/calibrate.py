@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-카메라 보정값 자동 추정
+Automatic camera calibration
 
-촬영 폴더의 사진끼리 겹치는 부분에서 특징점(SIFT)을 찾아 짝지은 뒤,
-모터 각도(meta.json)는 그대로 믿고 카메라 쪽 값들을 맞춘다.
-  - 화각(초점거리), 세로 비율
-  - 광학 중심 (cx, cy)
-  - 카메라 장착 기울어짐 (roll), 장착 좌우 틀어짐 (mount yaw)
-  - 렌즈 왜곡 (k1, k2)
-결과는 calib.json으로 저장되고, stitch_panorama.py가 자동으로 읽어 쓴다.
-카메라를 다시 장착하지 않는 한 한 번 구한 값을 다른 촬영에도 쓸 수 있다.
+Finds and pairs feature points (SIFT) where the photos of a capture folder overlap, then, trusting the motor angles
+in meta.json, fits the camera-side values:
+  - field of view (focal length), vertical aspect
+  - optical centre (cx, cy)
+  - camera mounting tilt (roll) and left/right twist (mount yaw)
+  - lens distortion (k1, k2)
+The result is saved as calib.json, which stitch_panorama.py reads automatically.
+As long as the camera is not remounted, the values can be reused for other captures.
 
-설치:  python -m pip install scipy
-실행:  python calibrate.py captures/20261020_210550
-       -> captures/20261020_210550/calib.json 과 같은 폴더의 상위에 camera_calib.json 저장
+Install: python -m pip install scipy
+Run:     python calibrate.py captures/20261020_210550
+         -> saves captures/20261020_210550/calib.json and camera_calib.json in the parent folder
 """
 import argparse
 import itertools
@@ -28,19 +28,21 @@ from scipy.optimize import least_squares
 PARAMS = ["f", "aspect", "cx", "cy", "roll", "myaw", "k1", "k2"]
 
 
-# ---------------- 회전 ----------------
+# ---------------- rotations ----------------
 def Ry(a):
+    """Rotation matrix about the y axis."""
     c, s = math.cos(a), math.sin(a)
     return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
 
 
 def Rz(a):
+    """Rotation matrix about the z axis."""
     c, s = math.cos(a), math.sin(a)
     return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
 
 
 def rig_rotation(yaw_deg, pitch_deg):
-    """모터 각도 -> 카메라 좌표(오른쪽, 위, 앞)를 세계 좌표로 바꾸는 회전 (stitch와 동일)"""
+    """Motor angles -> rotation from camera coordinates (right, up, forward) to world coordinates (same as stitch)."""
     psi, th = math.radians(yaw_deg), math.radians(pitch_deg)
     cp, sp, ct, st = math.cos(psi), math.sin(psi), math.cos(th), math.sin(th)
     r = [cp, 0, -sp]
@@ -50,12 +52,12 @@ def rig_rotation(yaw_deg, pitch_deg):
 
 
 def mount_rotation(p):
-    """카메라가 마운트에 붙은 방향 오차 (roll: 광축 둘레 기울어짐, myaw: 좌우 틀어짐)"""
+    """Rotation error of the camera on its mount (roll: tilt around the optical axis, myaw: left/right twist)."""
     return Rz(p["roll"]) @ Ry(p["myaw"])
 
 
 def pixels_to_cam_rays(p, P):
-    """픽셀 -> 카메라 좌표 광선 (렌즈 왜곡 보정 포함)"""
+    """Pixels -> rays in camera coordinates (lens distortion corrected)."""
     x = (P[:, 0] - p["cx"]) / p["f"]
     y = -(P[:, 1] - p["cy"]) / (p["f"] * p["aspect"])
     r2 = x * x + y * y
@@ -64,8 +66,9 @@ def pixels_to_cam_rays(p, P):
     return v / np.linalg.norm(v, axis=1, keepdims=True)
 
 
-# ---------------- 특징점 매칭 ----------------
+# ---------------- feature matching ----------------
 def match_pairs(folder, items, max_angle=75):
+    """Matches SIFT features between photos whose view directions are within max_angle, keeping RANSAC inliers."""
     sift = cv2.SIFT_create(nfeatures=4000)
     feats = []
     for it in items:
@@ -74,6 +77,7 @@ def match_pairs(folder, items, max_angle=75):
         feats.append((np.float32([k.pt for k in kp]), des))
 
     def axis(it):
+        """Returns the camera's viewing direction for one photo."""
         return rig_rotation(it["yaw_deg"], it["pitch_deg"])[:, 2]
 
     bf = cv2.BFMatcher()
@@ -99,17 +103,19 @@ def match_pairs(folder, items, max_angle=75):
     return out
 
 
-# ---------------- 최적화 ----------------
+# ---------------- optimisation ----------------
 class Problem:
     def __init__(self, items, pairs, W):
+        """Collects the matched points and the motor rotation of every photo."""
         self.R = [rig_rotation(it["yaw_deg"], it["pitch_deg"]) for it in items]
         self.I = np.concatenate([np.full(len(A), i) for i, j, A, B in pairs])
         self.J = np.concatenate([np.full(len(A), j) for i, j, A, B in pairs])
         self.PA = np.concatenate([A for i, j, A, B in pairs])
         self.PB = np.concatenate([B for i, j, A, B in pairs])
-        self.pix_per_rad = (W / 2) / math.tan(math.radians(40))   # 오차를 픽셀로 환산하는 고정 계수
+        self.pix_per_rad = (W / 2) / math.tan(math.radians(40))   # fixed factor that turns the angular error into pixels
 
     def world_rays(self, p, P, idx):
+        """Turns pixels of one or more photos into rays in world coordinates."""
         v = pixels_to_cam_rays(p, P) @ mount_rotation(p).T
         out = np.empty_like(v)
         for k in np.unique(idx):
@@ -118,12 +124,14 @@ class Problem:
         return out
 
     def residual(self, x, free, fixed):
+        """Angular mismatch in pixels between the world rays of every matched point pair."""
         p = dict(fixed)
         p.update(zip(free, x))
         c = np.cross(self.world_rays(p, self.PA, self.I), self.world_rays(p, self.PB, self.J))
         return np.arcsin(np.clip(np.linalg.norm(c, axis=1), 0, 1)) * self.pix_per_rad
 
     def fit(self, free, start):
+        """Fits the free parameters by robust least squares, starting from start."""
         sol = least_squares(self.residual, [start[k] for k in free], args=(free, start),
                             loss="soft_l1", f_scale=3.0, x_scale="jac")
         p = dict(start)
@@ -131,10 +139,12 @@ class Problem:
         return p, self.residual(sol.x, free, start)
 
     def keep(self, mask):
+        """Keeps only the matched points selected by mask."""
         self.I, self.J, self.PA, self.PB = self.I[mask], self.J[mask], self.PA[mask], self.PB[mask]
 
 
 def params_to_json(p, W, H, err):
+    """Converts the fitted parameters into the calib.json format."""
     return {
         "hfov_deg": 2 * math.degrees(math.atan((W / 2) / p["f"])),
         "vfov_deg": 2 * math.degrees(math.atan((H / 2) / (p["f"] * p["aspect"]))),
@@ -147,6 +157,7 @@ def params_to_json(p, W, H, err):
 
 
 def main():
+    """Matches features, fits the camera model in two passes, prints the result and writes calib.json."""
     ap = argparse.ArgumentParser()
     ap.add_argument("folder")
     args = ap.parse_args()
@@ -167,13 +178,13 @@ def main():
     before = np.median(prob.residual([], [], {**start, "aspect": (H / 2) / math.tan(
         math.radians(meta.get("vfov_deg", 65)) / 2) / f0}))
 
-    # 1차: 왜곡 없이 맞춘 뒤 이상치(잘못된 매칭) 제거
+    # pass 1: fit without distortion, then drop outliers (wrong matches)
     p, res = prob.fit(["f", "aspect", "cx", "cy", "roll", "myaw"], start)
     thr = max(15.0, 4 * float(np.median(res)))
     prob.keep(res < thr)
     print(f"  잘못된 매칭 제거 후 대응점 {len(prob.I)}개 (기준 {thr:.0f}px)")
 
-    # 2차: 전체
+    # pass 2: all parameters
     p, res = prob.fit(PARAMS, p)
     err = float(np.median(res))
     out = params_to_json(p, W, H, err)

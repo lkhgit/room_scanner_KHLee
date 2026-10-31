@@ -1,40 +1,42 @@
 #!/usr/bin/env python3
 """
-표면 온습도·곰팡이(VTT) 시뮬레이터
+Surface temperature/humidity and mold (VTT) simulator
 
-logger.py가 만든 세션 폴더와 기상청 자료로 면별 표면 온습도를 1시간 간격으로 1년(또는 최근
-365일) 시뮬레이션하고 VTT 곰팡이 지수 M(0~6)을 계산한다. 식과 기본값은
-"표면 온습도·곰팡이(VTT) 시뮬레이션 구현 명세"(원 명세)와
-"곰팡이 시뮬레이터 수정 명세: 당일 측정·파라미터 신뢰도·기상 기간"(수정 명세)을 따른다.
+From a session folder written by logger.py and KMA weather data, simulates each face's surface temperature and
+humidity hour by hour over a year (or the last 365 days) and computes the VTT mold index M (0-6). The formulas and
+defaults follow the "surface temperature/humidity and mold (VTT) simulation implementation spec" (original spec) and
+the "mold simulator revision spec: same-day measurement, parameter reliability, weather period" (revised spec).
 
-입력
-    <session-dir>/scans.csv, session.yaml   logger.py 출력
-    <session-dir>/outdoor.csv                측정 시점 외기 (로거가 초단기실황으로 모음, 빠진 시각은 여기서 보충)
-    config.yaml                              설정 (없으면 기본값)
-    asos_stations.yaml / .csv                관측소 좌표 (격자 변환·관측소 자동 선택용)
-    kma.py                                   기상청·카카오 인증키와 API 함수
+Input
+    <session-dir>/scans.csv, session.yaml   logger.py output
+    <session-dir>/outdoor.csv                outdoor air at scan time (collected by the logger from the ultra-short-term
+                                             observations; missing hours are filled in here)
+    config.yaml                              settings (defaults if missing)
+    asos_stations.yaml / .csv                station coordinates (for the grid conversion and automatic station choice)
+    kma.py                                   KMA and Kakao API keys and API functions
 
-관측소는 config의 station_id -> session.yaml의 asos_station -> 장소에서 가장 가까운
-관측소(지중온도를 재는 곳) 순서로 정한다. 장소 좌표가 없으면 site.name을 카카오 로컬
-API로 찾아 session.yaml에 저장한다.
+The station is chosen from config station_id, then session.yaml asos_station, then the station nearest the site that
+measures ground temperature. If the site has no coordinates, site.name is looked up with the Kakao Local API and
+saved to session.yaml.
 
-측정값에서 구한 면별 f와 dv_max는 불확도 sigma를 함께 계산한다. 스캔이 한 번뿐이어도 계산할 수
-있으면 측정값을 그대로 쓰고, sigma가 크면 경고만 남긴다(판정 uncertain). 대체값은 계산이 불가능할
-때만 쓰며, 그때 결과를 "잠정"으로 표시한다. 어느 경우든 중앙(central)·보수(worst) 두 시나리오로
-시뮬레이션한다. 보수 시나리오는 f - 2 sigma, dv_max + 2 sigma.
+Each face's f and dv_max from the measurements come with an uncertainty sigma. Even with a single scan, the measured
+value is used whenever it can be computed; a large sigma only adds a warning (judgment "uncertain"). Substitute
+values are used only when no value can be computed, and the result is then marked "provisional". Either way two
+scenarios are simulated, central and worst; the worst scenario uses f - 2 sigma and dv_max + 2 sigma.
 
-출력 (<session-dir>/sim/, <기간> = 연도 또는 last365_<시작일>)
-    params.json          f·sigma_f·판정, dv_max·sigma·판정, 스캔별 외기 출처·지중 lag, 기간, 잠정 여부, 경고
-    hourly_<기간>.csv    행 = 시나리오 x 시각 x 면
-    summary_<기간>.csv   행 = 면, 시나리오별 열 (_central, _worst). 머리의 # 줄은 주석
-    compare_periods.csv  여러 기간을 돌린 경우
-    viewer_<기간>.json   HTML 뷰어용 (열 지향 배열, 시나리오별)
-    viewer_index.json    뷰어가 읽을 기간·파일 목록
-    plots/               --plot 사용 시 면별 PNG
-기상 자료 캐시: <session-dir>/../kma_cache/
+Output (<session-dir>/sim/, <period> = a year or last365_<start date>)
+    params.json          f, sigma_f, judgment; dv_max, sigma, judgment; outdoor source and ground lag per scan;
+                         periods; provisional flag; warnings
+    hourly_<period>.csv  rows = scenario x hour x face
+    summary_<period>.csv rows = faces, columns per scenario (_central, _worst). The # lines at the top are comments
+    compare_periods.csv  when several periods were run
+    viewer_<period>.json for the HTML viewer (column arrays, per scenario)
+    viewer_index.json    periods and files for the viewer
+    plots/               PNG per face with --plot
+Weather data cache: <session-dir>/../kma_cache/
 
-사용법
-    kma.py에 KMA_SERVICE_KEY(필요하면 KAKAO_REST_KEY)를 적는다
+Usage
+    put KMA_SERVICE_KEY (and KAKAO_REST_KEY if needed) in kma.py
     python mold_simulator.py --session-dir data/banjiha_A [--years 2025 2024 | --period last365] [--plot]
 """
 
@@ -57,20 +59,21 @@ SCENARIOS = ("central", "worst")
 
 
 def now_iso() -> str:
+    """Returns the current time in KST as an ISO string."""
     return datetime.now(KST).isoformat(timespec="seconds")
 
 
 def today() -> pd.Timestamp:
-    """오늘 0시 (KST, naive). 테스트에서 바꿔 끼운다."""
+    """Today at 00:00 (KST, naive). Tests swap this out."""
     return pd.Timestamp.now(tz=TZ).tz_localize(None).normalize()
 
 
-# ---------------------------------------------------------------- 설정 (원 명세 §7, 수정 명세 §6.1)
+# ---------------------------------------------------------------- settings (original spec §7, revised spec §6.1)
 DEFAULTS = {
-    "station_id": None,                    # None이면 session.yaml 또는 장소로 정함
+    "station_id": None,                    # None: taken from session.yaml or the site
     "ground_depth_m": 1.0,
     "period": "year",                      # year | last365
-    "sim_years": None,                     # None이면 직전 완결 연도
+    "sim_years": None,                     # None: the last complete year
     "heating_months": [11, 12, 1, 2, 3],
     "cooling_months": [6, 7, 8, 9],
     "hvac_hours": list(range(18, 24)) + list(range(0, 8)),
@@ -82,7 +85,7 @@ DEFAULTS = {
     "g_min": 0.3,
     "dv_max_override": None,
     "f_override": {},
-    "outdoor_source": "auto",              # auto(ASOS 우선) | asos | ncst
+    "outdoor_source": "auto",              # auto (ASOS first) | asos | ncst
     "ground_lag_max_days": 3,
     "sigma_ir": 0.5,
     "sigma_sht": 0.2,
@@ -104,7 +107,7 @@ DEFAULTS = {
 
 
 def parse_hours(spec) -> list[int]:
-    """[18, 19, ...] 또는 ["18-23", "0-7"] 형식을 시 목록으로 바꾼다."""
+    """Turns [18, 19, ...] or ["18-23", "0-7"] into a list of hours."""
     hours = []
     for h in spec:
         if isinstance(h, str) and "-" in h:
@@ -116,7 +119,7 @@ def parse_hours(spec) -> list[int]:
 
 
 def load_config(path: Path | None) -> tuple[dict, dict]:
-    """(병합된 설정, 사용자가 직접 적은 항목)을 돌려준다."""
+    """Returns (merged settings, the entries the user wrote)."""
     user = {}
     if path is not None:
         with path.open(encoding="utf-8") as f:
@@ -133,39 +136,40 @@ def load_config(path: Path | None) -> tuple[dict, dict]:
     return cfg, user
 
 
-# ---------------------------------------------------------------- 습공기 식 (원 명세 §4.1)
+# ---------------------------------------------------------------- moist air formulas (original spec §4.1)
 def rho_v(p, T):
-    """수증기압 [hPa] -> 수증기 밀도 [g/m3]."""
+    """Vapour pressure [hPa] -> vapour density [g/m3]."""
     return 216.68 * np.asarray(p, dtype=float) / (np.asarray(T, dtype=float) + 273.15)
 
 
 def rho_sat(T):
-    """포화 수증기 밀도 [g/m3]."""
+    """Saturation vapour density [g/m3]."""
     return rho_v(p_sat(T), T)
 
 
 def dv_to_dp(dv, T):
-    """수증기 밀도 차 [g/m3] -> 수증기압 차 [hPa]."""
+    """Vapour density difference [g/m3] -> vapour pressure difference [hPa]."""
     return np.asarray(dv, dtype=float) * (np.asarray(T, dtype=float) + 273.15) / 216.68
 
 
 def g_shape(theta_e24, T_low=0.0, T_high=20.0):
-    """가정 A1: 실내 습기 부하의 모양 함수. 외기 24시간 이동평균 온도의 함수."""
+    """Assumption A1: shape function of the indoor moisture load, a function of the 24-hour moving mean outdoor temperature."""
     return np.clip((T_high - np.asarray(theta_e24, dtype=float)) / (T_high - T_low), 0.0, 1.0)
 
 
-# ---------------------------------------------------------------- ASOS 수집 (원 명세 §2.2)
+# ---------------------------------------------------------------- ASOS download (original spec §2.2)
 HOURLY_URL = "http://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList"
 DAILY_URL = "http://apis.data.go.kr/1360000/AsosDalyInfoService/getWthrDataList"
 HOURLY_FIELDS = ["tm", "ta", "hm", "pv"]
 GROUND_COLS = {0.5: "avgM05Te", 1.0: "avgM10Te", 1.5: "avgM15Te", 3.0: "avgM30Te", 5.0: "avgM50Te"}
 DAILY_FIELDS = ["tm"] + list(GROUND_COLS.values())
 MAX_GAP_H = 6
-PARTIAL_CACHE_H = 3                        # 끝나지 않은 달의 캐시를 다시 쓰는 시간
-HOURLY_MIN, DAILY_MIN = 0.99, 0.95         # 기간 자료 충족률 (수정 명세 §5)
+PARTIAL_CACHE_H = 3                        # hours a month that has not ended stays cached
+HOURLY_MIN, DAILY_MIN = 0.99, 0.95         # required data coverage over the period (revised spec §5)
 
 
 def _service_key() -> str:
+    """Returns the KMA service key, or stops with the error message if it is missing."""
     try:
         return kma.service_key()
     except RuntimeError as e:
@@ -173,6 +177,7 @@ def _service_key() -> str:
 
 
 def _kma_request(url: str, params: dict) -> list[dict]:
+    """Calls a KMA ASOS API and collects the items of every page."""
     import requests
     items, page = [], 1
     while True:
@@ -200,7 +205,7 @@ def _kma_request(url: str, params: dict) -> list[dict]:
 
 
 def fetch_month(kind: str, station: int, month: pd.Period, cache_dir: Path) -> pd.DataFrame:
-    """한 달치 ASOS 자료(문자열 그대로). 끝난 달은 영구 캐시, 진행 중인 달은 몇 시간만 캐시한다."""
+    """One month of ASOS data (as strings). Finished months are cached for good, the current month for a few hours."""
     fields = HOURLY_FIELDS if kind == "hourly" else DAILY_FIELDS
     yesterday = today() - pd.Timedelta(days=1)
     start = month.start_time
@@ -235,13 +240,14 @@ def fetch_month(kind: str, station: int, month: pd.Period, cache_dir: Path) -> p
 
 def fetch_range(kind: str, station: int, start: pd.Timestamp, end: pd.Timestamp,
                 cache_dir: Path) -> pd.DataFrame:
+    """Fetches ASOS data month by month over a date range and joins it."""
     months = pd.period_range(start, end, freq="M")
     frames = [fetch_month(kind, station, m, cache_dir) for m in months]
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def asos_hourly_raw(station: int, start_h: pd.Timestamp, end_h: pd.Timestamp, cache_dir: Path) -> pd.DataFrame:
-    """[start_h, end_h] 정시별 ta, hm, pv (결측은 NaN, 보간하지 않음). pv가 없으면 ta·hm으로 계산."""
+    """Hourly ta, hm, pv over [start_h, end_h] (missing values are NaN, not interpolated). pv is computed from ta and hm if missing."""
     grid = pd.date_range(start_h, end_h, freq="h")
     raw = fetch_range("hourly", station, start_h.normalize(), end_h.normalize(), cache_dir)
     if raw.empty:
@@ -256,7 +262,7 @@ def asos_hourly_raw(station: int, start_h: pd.Timestamp, end_h: pd.Timestamp, ca
 
 def ground_daily(station: int, start: pd.Timestamp, end: pd.Timestamp, depth: float,
                  cache_dir: Path) -> pd.Series:
-    """일별 지중온도 (결측 날짜는 빠짐)."""
+    """Daily ground temperature (missing days are left out)."""
     daily = fetch_range("daily", station, start, end, cache_dir)
     col = GROUND_COLS[depth]
     if daily.empty or col not in daily:
@@ -267,7 +273,7 @@ def ground_daily(station: int, start: pd.Timestamp, end: pd.Timestamp, depth: fl
 
 
 def check_coverage(ok: pd.Series, need: float, label: str, what: str) -> None:
-    """ok(시각별 bool)의 충족률이 need 미만이면 빈 달을 알려 주고 멈춘다."""
+    """Stops with the list of empty months if the share of True in ok (one bool per time) is below need."""
     frac = float(ok.mean()) if len(ok) else 0.0
     if frac >= need:
         return
@@ -277,7 +283,7 @@ def check_coverage(ok: pd.Series, need: float, label: str, what: str) -> None:
 
 
 def _long_gaps(missing: pd.Series, max_len: int) -> np.ndarray:
-    """max_len 시간보다 긴 결측 구간에 속한 시각이면 True."""
+    """True for hours that belong to a gap longer than max_len hours."""
     runs = (missing != missing.shift()).cumsum()
     length = missing.groupby(runs).transform("size")
     return (missing & (length > max_len)).to_numpy()
@@ -285,8 +291,8 @@ def _long_gaps(missing: pd.Series, max_len: int) -> np.ndarray:
 
 def load_weather(station: int, start: pd.Timestamp, end: pd.Timestamp, depth: float,
                  cache_dir: Path, warnings: list, label: str) -> pd.DataFrame:
-    """[start 00시, end 23시] 시간별 외기·지중온도. 열: theta_e, p_e, theta_e24, theta_g, data_flag."""
-    pre = start - pd.Timedelta(days=1)    # theta_e24 계산용 전날
+    """Hourly outdoor and ground temperature over [start 00:00, end 23:00]. Columns: theta_e, p_e, theta_e24, theta_g, data_flag."""
+    pre = start - pd.Timedelta(days=1)    # the day before, for theta_e24
     df = asos_hourly_raw(station, pre, end + pd.Timedelta(hours=23), cache_dir)
     in_range = df.index >= start
     check_coverage((df["ta"].notna() & df["pv"].notna())[in_range], HOURLY_MIN, label, "외기 시간 자료")
@@ -310,20 +316,20 @@ def load_weather(station: int, start: pd.Timestamp, end: pd.Timestamp, depth: fl
     w["theta_e"] = df["ta"]
     w["p_e"] = df["pv"]
     w["theta_e24"] = w["theta_e"].rolling(24, min_periods=1).mean()
-    # 일평균을 각 날짜 12:00에 놓고 시간 단위로 선형 보간 (원 명세 §4.5)
+    # daily means placed at 12:00 of each day and interpolated linearly to hours (original spec §4.5)
     noon = (tg.index + pd.Timedelta(hours=12)).asi8
     w["theta_g"] = np.interp(df.index.asi8, noon, tg.to_numpy())
     w["data_flag"] = flag
     return w.loc[start:]
 
 
-# ---------------------------------------------------------------- 관측소 선택
-MAX_CANDIDATES = 10                        # 지중온도 확인을 시도할 가까운 관측소 수
+# ---------------------------------------------------------------- station choice
+MAX_CANDIDATES = 10                        # number of nearby stations to check for ground temperature
 FAR_KM = 30.0
 
 
 def has_ground_temp(station: int, depth: float, month: pd.Period, cache_dir: Path) -> bool:
-    """그 달 일자료에 지중온도가 있는지. ASOS가 아닌 지점은 빈 캐시가 남아 다시 묻지 않는다."""
+    """Tells whether the month's daily data has ground temperature. Non-ASOS stations leave an empty cache, so they are not asked again."""
     try:
         d = fetch_month("daily", station, month, cache_dir)
     except RuntimeError:
@@ -334,7 +340,7 @@ def has_ground_temp(station: int, depth: float, month: pd.Period, cache_dir: Pat
 
 def choose_station(session: dict, session_path: Path, depth: float, month: pd.Period,
                    cache_dir: Path, warnings: list) -> dict:
-    """장소 좌표(없으면 이름을 지오코딩)에서 가장 가까운, 지중온도를 재는 관측소."""
+    """The station nearest the site coordinates (geocoded from the name if missing) that measures ground temperature."""
     site = session.get("site") or {}
     lat, lon = site.get("lat"), site.get("lon")
     if lat is None or lon is None:
@@ -370,8 +376,9 @@ def choose_station(session: dict, session_path: Path, depth: float, month: pd.Pe
                      "config에 station_id를 직접 적을 것")
 
 
-# ---------------------------------------------------------------- 측정 데이터 (원 명세 §2.1)
+# ---------------------------------------------------------------- measurement data (original spec §2.1)
 def load_session(session_dir: Path) -> tuple[dict, pd.DataFrame]:
+    """Reads session.yaml and scans.csv, with the scan timestamps in KST."""
     with (session_dir / "session.yaml").open(encoding="utf-8") as f:
         session = yaml.safe_load(f) or {}
     scans = pd.read_csv(session_dir / "scans.csv")
@@ -381,7 +388,7 @@ def load_session(session_dir: Path) -> tuple[dict, pd.DataFrame]:
 
 
 def face_table(scans: pd.DataFrame, session: dict, cfg: dict, warnings: list) -> pd.DataFrame:
-    """면별 위치·재료·제외 여부. 행 = 면 1..20."""
+    """Position, material and exclusion of each face. Rows = faces 1..20."""
     geo = scans.groupby("face")[["zone", "az_deg", "el_deg"]].first()
     missing = sorted(set(range(1, N_FACES + 1)) - set(geo.index))
     if missing:
@@ -403,6 +410,7 @@ def face_table(scans: pd.DataFrame, session: dict, cfg: dict, warnings: list) ->
 
 
 def filter_scans(scans: pd.DataFrame, faces: pd.DataFrame, cfg: dict, warnings: list) -> pd.DataFrame:
+    """Drops noisy readings (IR standard deviation above sd_max) and excluded faces."""
     noisy = scans["t_surf_sd_c"] > cfg["sd_max"]
     if noisy.any():
         warnings.append(f"IR 표준편차 > sd_max {cfg['sd_max']} °C 인 면·스캔 {noisy.sum()}개를 f 추출에서 뺌")
@@ -410,9 +418,9 @@ def filter_scans(scans: pd.DataFrame, faces: pd.DataFrame, cfg: dict, warnings: 
     return scans[~noisy & ~excl]
 
 
-# ---------------------------------------------------------------- 측정 시점 외기 (수정 명세 §2)
+# ---------------------------------------------------------------- outdoor air at scan time (revised spec §2)
 def select_outdoor(rows: list[dict], source: str) -> pd.DataFrame:
-    """정시별로 쓸 외기 한 행. auto는 ASOS를 우선한다. 열: t_out_c, p_out_hpa, source."""
+    """One outdoor row per full hour. auto prefers ASOS. Columns: t_out_c, p_out_hpa, source."""
     order = {"auto": ["asos", "ncst"], "asos": ["asos"], "ncst": ["ncst"]}[source]
     df = pd.DataFrame(rows, columns=kma.OUTDOOR_COLUMNS)
     df = df[df["source"].isin(order) & df["t_out_c"].notna() & df["p_out_hpa"].notna()].copy()
@@ -425,7 +433,7 @@ def select_outdoor(rows: list[dict], source: str) -> pd.DataFrame:
 
 def fill_outdoor(path: Path, need: list[pd.Timestamp], session: dict, station: int, cfg: dict,
                  cache_dir: Path, warnings: list) -> list[dict]:
-    """need 정시 중 outdoor.csv에 없는 값을 ASOS(있으면), 그다음 초단기실황으로 채운다."""
+    """Fills the hours in need that outdoor.csv lacks from ASOS (if available), then from the ultra-short-term observations."""
     src = cfg["outdoor_source"]
     if src in ("auto", "asos"):
         raw = asos_hourly_raw(station, min(need), max(need), cache_dir)
@@ -456,7 +464,7 @@ def fill_outdoor(path: Path, need: list[pd.Timestamp], session: dict, station: i
 
 
 def ground_for_day(tg: pd.Series, day: pd.Timestamp):
-    """그 날짜의 지중온도. 없으면 이전에서 가장 가까운 날 값. (값, lag 일수) 또는 (NaN, NaN)."""
+    """Ground temperature of that day, or of the nearest earlier day. (value, lag in days) or (NaN, NaN)."""
     prior = tg[tg.index <= day]
     if prior.empty:
         return np.nan, np.nan
@@ -464,7 +472,7 @@ def ground_for_day(tg: pd.Series, day: pd.Timestamp):
 
 
 def scan_conditions(scans: pd.DataFrame, outdoor: pd.DataFrame, tg: pd.Series) -> pd.DataFrame:
-    """스캔별 실내 조건, 같은 시각의 외기, 지중온도와 lag. 행 = scan_id."""
+    """Indoor conditions per scan, outdoor air at the same hour, ground temperature and its lag. Rows = scan_id."""
     per = scans.groupby("scan_id").first()[["timestamp", "t_air_c", "rh_pct"]]
     per["out_hour"] = per["timestamp"].dt.floor("h")
     o = outdoor.reindex(per["out_hour"])
@@ -472,7 +480,7 @@ def scan_conditions(scans: pd.DataFrame, outdoor: pd.DataFrame, tg: pd.Series) -
     per["p_e"] = o["p_out_hpa"].to_numpy()
     per["out_source"] = o["source"].to_numpy()
     e24, n24 = [], []
-    for h in per["out_hour"]:            # 직전 24개 정시 중 18개 이상 있어야 계산 (수정 명세 §2.5)
+    for h in per["out_hour"]:            # needs at least 18 of the last 24 full hours (revised spec §2.5)
         win = outdoor["t_out_c"].reindex(pd.date_range(h - pd.Timedelta(hours=23), h, freq="h"))
         n = int(win.notna().sum())
         n24.append(n)
@@ -484,31 +492,34 @@ def scan_conditions(scans: pd.DataFrame, outdoor: pd.DataFrame, tg: pd.Series) -
     return per
 
 
-# ---------------------------------------------------------------- 파라미터 추출과 불확도 (수정 명세 §4)
+# ---------------------------------------------------------------- parameter extraction and uncertainty (revised spec §4)
 DV_CLASSES = np.array([0.0, 2.0, 4.0, 6.0, 8.0, 10.0])
 
 
 def fit_origin(x, y) -> float:
-    """원점을 지나는 최소제곱 기울기."""
+    """Least-squares slope of a line through the origin."""
     x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
     return float(np.sum(x * y) / np.sum(x * x))
 
 
 def round_dv_class(v: float) -> float:
+    """Rounds a dv_max value to the nearest humidity class."""
     return float(DV_CLASSES[np.abs(DV_CLASSES - v).argmin()])
 
 
 def dv_max_fit(g, dv) -> float:
+    """Fits dv_max as the slope of the moisture excess against g, never below 0."""
     return max(fit_origin(g, dv), 0.0)
 
 
 def f_fit(theta_si, theta_i, theta_g) -> float:
+    """Fits the temperature factor f from surface, indoor and ground temperatures."""
     theta_g = np.asarray(theta_g, dtype=float)
     return fit_origin(np.asarray(theta_i) - theta_g, np.asarray(theta_si) - theta_g)
 
 
 def sigma_f(f: float, delta, sd, lag, cfg: dict) -> float:
-    """f의 불확도. 스캔별 무작위 성분 + 모든 스캔에 공통인 계통 성분 (수정 명세 §4.1)."""
+    """Uncertainty of f: a random part per scan plus a systematic part shared by all scans (revised spec §4.1)."""
     delta, sd, lag = (np.asarray(v, dtype=float) for v in (delta, sd, lag))
     rs2 = sd ** 2 + ((1 - f) * 0.2 * lag) ** 2
     sys2 = cfg["sigma_ir"] ** 2 + f ** 2 * cfg["sigma_sht"] ** 2 + (1 - f) ** 2 * cfg["sigma_site"] ** 2
@@ -517,7 +528,7 @@ def sigma_f(f: float, delta, sd, lag, cfg: dict) -> float:
 
 
 def sigma_dv_max(g, theta_e, theta_i, cfg: dict) -> float:
-    """dv_max의 불확도 (수정 명세 §4.2)."""
+    """Uncertainty of dv_max (revised spec §4.2)."""
     g = np.asarray(g, dtype=float)
     rs2 = (rho_sat(theta_e) * cfg["sigma_rh_out"] / 100) ** 2 + cfg["sigma_beh"] ** 2
     ssys = rho_sat(theta_i) * cfg["sigma_rh_in"] / 100
@@ -526,7 +537,7 @@ def sigma_dv_max(g, theta_e, theta_i, cfg: dict) -> float:
 
 
 def extract_dv_max(per: pd.DataFrame, cfg: dict, warnings: list) -> dict:
-    """dv_max와 판정. central/worst에 시나리오별 값을 담는다."""
+    """dv_max and its judgment, with the value for each scenario in central/worst."""
     ok = per[["theta_e", "p_e", "theta_e24"]].notna().all(axis=1)
     if (~ok).any():
         warnings.append(f"외기 자료(정시 값, 직전 24시간 중 18개 이상)가 없는 스캔 {int((~ok).sum())}개를 "
@@ -551,7 +562,7 @@ def extract_dv_max(per: pd.DataFrame, cfg: dict, warnings: list) -> dict:
             out.update(dv_max_raw=raw, sigma=sig)
             if raw < 0:
                 warnings.append(f"측정 dv_max가 음수({raw:.2f} g/m3) - 0으로 둠")
-            # 불확도가 커도 측정값을 쓴다. 보수 시나리오는 +2 sigma, 습도 등급 최대 10 g/m3로 상한
+            # the measured value is used even when uncertain; the worst scenario adds 2 sigma, capped at the top humidity class of 10 g/m3
             clipped = max(raw, 0.0)
             central = round_dv_class(clipped) if cfg["round_to_class"] else clipped
             worst = max(central, min(clipped + 2 * sig, float(DV_CLASSES[-1])))
@@ -568,10 +579,10 @@ def extract_dv_max(per: pd.DataFrame, cfg: dict, warnings: list) -> dict:
 
 def extract_f(valid: pd.DataFrame, per: pd.DataFrame, faces: pd.DataFrame, cfg: dict,
               warnings: list) -> pd.DataFrame:
-    """면별 f, sigma_f, 판정, 시나리오별 f.
+    """f, sigma_f, judgment and per-scenario f for each face.
 
-    계산할 수 있으면 불확도와 관계없이 측정값을 쓴다 (measured / uncertain / anomaly).
-    대체값은 그 면의 스캔이 없거나 실내-지중 차가 0이라 계산할 수 없을 때만 쓴다 (substitute).
+    Whenever f can be computed, the measured value is used regardless of its uncertainty (measured / uncertain / anomaly).
+    Substitutes are used only when it cannot be computed: no scan of that face, or no indoor-ground difference (substitute).
     """
     lag_ok = per["ground_lag"].notna() & (per["ground_lag"] <= cfg["ground_lag_max_days"])
     if (~lag_ok).any():
@@ -624,7 +635,7 @@ def extract_f(valid: pd.DataFrame, per: pd.DataFrame, faces: pd.DataFrame, cfg: 
 
 
 def provisional_message(fres: pd.DataFrame, dv: dict) -> str | None:
-    """대체값이 하나라도 쓰이면 '잠정 결과: ...' 문장."""
+    """The '잠정 결과: ...' (provisional result) sentence if any substitute value is used."""
     faces = [int(k) for k in fres.index[fres["judgment"] == "substitute"]]
     parts = []
     if faces:
@@ -635,8 +646,9 @@ def provisional_message(fres: pd.DataFrame, dv: dict) -> str | None:
     return f"잠정 결과: 대체값 사용({', '.join(parts)})" if parts else None
 
 
-# ---------------------------------------------------------------- 기간 (수정 명세 §5)
+# ---------------------------------------------------------------- periods (revised spec §5)
 def resolve_periods(period: str, years, now_day: pd.Timestamp) -> list[dict]:
+    """Turns the period setting into a list of periods: whole past years or the last 365 days."""
     if period == "last365":
         start, end = now_day - pd.Timedelta(days=365), now_day - pd.Timedelta(days=1)
         return [{"label": f"last365_{start:%Y%m%d}", "mode": "last365", "year": None,
@@ -652,11 +664,12 @@ def resolve_periods(period: str, years, now_day: pd.Timestamp) -> list[dict]:
              "start": pd.Timestamp(y, 1, 1), "end": pd.Timestamp(y, 12, 31)} for y in years]
 
 
-# ---------------------------------------------------------------- 시간별 조건 (원 명세 §4.4-4.6)
+# ---------------------------------------------------------------- hourly conditions (original spec §4.4-4.6)
 MODE_OFF, MODE_HEAT, MODE_COOL = 0, 1, 2
 
 
 def hvac_mode(index: pd.DatetimeIndex, cfg: dict) -> np.ndarray:
+    """HVAC mode for every hour: heating or cooling during the set hours and months, otherwise off."""
     on = np.isin(index.hour, cfg["hvac_hours"])
     heat = on & np.isin(index.month, cfg["heating_months"])
     cool = on & np.isin(index.month, cfg["cooling_months"]) & ~heat
@@ -664,7 +677,7 @@ def hvac_mode(index: pd.DatetimeIndex, cfg: dict) -> np.ndarray:
 
 
 def indoor_conditions(w: pd.DataFrame, cfg: dict, dv_max: float):
-    """가정 A3/A4의 실내 기온과 A1의 실내 수증기압. (mode, theta_i, p_i)"""
+    """Indoor temperature from assumptions A3/A4 and indoor vapour pressure from A1. (mode, theta_i, p_i)"""
     mode = hvac_mode(w.index, cfg)
     theta_e = w["theta_e"].to_numpy()
     theta_i = np.select([mode == MODE_HEAT, mode == MODE_COOL],
@@ -676,17 +689,17 @@ def indoor_conditions(w: pd.DataFrame, cfg: dict, dv_max: float):
 
 
 def surface_temperature(theta_g, theta_i, hvac_on, f):
-    """가정 A2-A4: 가동 중이면 theta_g + f (theta_i - theta_g), 아니면 theta_g."""
+    """Assumptions A2-A4: theta_g + f (theta_i - theta_g) while heating or cooling runs, otherwise theta_g."""
     theta_g, theta_i = np.asarray(theta_g, dtype=float), np.asarray(theta_i, dtype=float)
     return np.where(hvac_on, theta_g + np.asarray(f) * (theta_i - theta_g), theta_g)
 
 
 def surface_rh(p_i, theta_si):
-    """가정 A5: 표면 앞 수증기압 = 실내 수증기압. [%], 100 초과 가능(결로)."""
+    """Assumption A5: vapour pressure at the surface = indoor vapour pressure. [%], can exceed 100 (condensation)."""
     return 100 * np.asarray(p_i, dtype=float) / p_sat(theta_si)
 
 
-# ---------------------------------------------------------------- VTT 모델 (원 명세 §5)
+# ---------------------------------------------------------------- VTT model (original spec §5)
 MATERIALS = {   # k1(M<1), k1(M>=1), A, B, C, RH_min
     "very_sensitive":   dict(k1a=1.0,   k1b=2.0,   A=1.0, B=7.0, C=2.0, RH_min=80.0),
     "sensitive":        dict(k1a=0.578, k1b=0.386, A=0.3, B=6.0, C=1.0, RH_min=80.0),
@@ -696,22 +709,23 @@ MATERIALS = {   # k1(M<1), k1(M>=1), A, B, C, RH_min
 
 
 def rh_crit(T, RH_min):
-    """임계 상대습도. 3차 곡선은 목재 기준이라 RH_min과의 max를 쓴다(구현 선택)."""
+    """Critical relative humidity. The cubic curve is for wood, so the max with RH_min is used (implementation choice)."""
     T = np.asarray(T, dtype=float)
     cubic = -0.00267 * T**3 + 0.160 * T**2 - 3.13 * T + 100.0
     return np.where(T <= 20, np.maximum(cubic, RH_min), RH_min)
 
 
 def material_arrays(names) -> dict:
+    """Collects each VTT material parameter into an array with one value per face."""
     return {key: np.array([MATERIALS[n][key] for n in names]) for key in MATERIALS["sensitive"]}
 
 
 def vtt_step(M, T, RH, n_off, mat: dict, C_mat: float):
-    """1시간 진행. n_off = 성장 조건이 끝난 뒤 지난 시간 수. (M, n_off)를 돌려준다."""
+    """Advances one hour. n_off = hours since growth conditions ended. Returns (M, n_off)."""
     rc = rh_crit(T, mat["RH_min"])
     grow = (T > 0) & (RH >= rc)
 
-    Tg = np.where(grow, T, 1.0)            # 비성장 칸의 log 경고 방지
+    Tg = np.where(grow, T, 1.0)            # avoids log warnings in cells that are not growing
     RHg = np.where(grow, RH, 100.0)
     k1 = np.where(M < 1, mat["k1a"], mat["k1b"])
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -727,7 +741,7 @@ def vtt_step(M, T, RH, n_off, mat: dict, C_mat: float):
 
 
 def run_vtt(T, RH, materials, C_mat: float, M0=0.0) -> np.ndarray:
-    """T, RH: (시각, 면) 배열. 각 시각이 끝난 뒤의 M을 같은 모양으로 돌려준다."""
+    """T, RH: (hour, face) arrays. Returns M after each hour, in the same shape."""
     T, RH = np.atleast_2d(T), np.atleast_2d(RH)
     mat = material_arrays(materials)
     M = np.full(T.shape[1], float(M0))
@@ -739,9 +753,9 @@ def run_vtt(T, RH, materials, C_mat: float, M0=0.0) -> np.ndarray:
     return out
 
 
-# ---------------------------------------------------------------- 시뮬레이션
+# ---------------------------------------------------------------- simulation
 def simulate(w: pd.DataFrame, f: np.ndarray, materials: list[str], cfg: dict, dv_max: float) -> dict:
-    """한 기간 시뮬레이션. 면 방향 배열은 (시각, 면)."""
+    """Simulates one period. Per-face arrays are (hour, face)."""
     mode, theta_i, p_i = indoor_conditions(w, cfg, dv_max)
     theta_g = w["theta_g"].to_numpy()
     theta_si = surface_temperature(theta_g[:, None], theta_i[:, None], (mode != MODE_OFF)[:, None],
@@ -754,10 +768,12 @@ def simulate(w: pd.DataFrame, f: np.ndarray, materials: list[str], cfg: dict, dv
 
 
 def iso(ts) -> str:
+    """Formats a timestamp as ISO with the KST offset."""
     return pd.Timestamp(ts).strftime("%Y-%m-%dT%H:%M:%S") + TZ_SUFFIX
 
 
 def first_time(index: pd.DatetimeIndex, hit: np.ndarray):
+    """Returns the first time a condition holds, or None."""
     i = np.flatnonzero(hit)
     return iso(index[i[0]]) if len(i) else None
 
@@ -766,7 +782,7 @@ SUMMARY_METRICS = ["M_max_year", "M_final", "first_M1_time", "first_M3_time", "c
 
 
 def summarize(index: pd.DatetimeIndex, res: dict, faces: pd.DataFrame) -> pd.DataFrame:
-    """한 시나리오의 면별 요약. 열 = SUMMARY_METRICS."""
+    """Per-face summary of one scenario. Columns = SUMMARY_METRICS."""
     rh_month = pd.DataFrame(res["rh_si"], index=index).groupby(index.month).mean()
     rows = []
     for j, k in enumerate(faces.index):
@@ -784,7 +800,7 @@ def summarize(index: pd.DatetimeIndex, res: dict, faces: pd.DataFrame) -> pd.Dat
 
 
 def scenario_summary(index: pd.DatetimeIndex, results: dict, faces: pd.DataFrame) -> pd.DataFrame:
-    """면별 위치·f 판정 + 시나리오별 요약 (열 이름 끝에 _central, _worst)."""
+    """Per-face position and f judgment plus the summary of each scenario (columns end in _central, _worst)."""
     out = pd.DataFrame({"zone": faces["zone"], "az": faces["az_deg"], "el": faces["el_deg"],
                         "f_judgment": faces["judgment"],
                         "sigma_f": faces["sigma_f"].map(lambda v: None if pd.isna(v) else round(float(v), 3)),
@@ -796,14 +812,16 @@ def scenario_summary(index: pd.DatetimeIndex, results: dict, faces: pd.DataFrame
     return out
 
 
-# ---------------------------------------------------------------- 출력 (원 명세 §6, 수정 명세 §6.3)
+# ---------------------------------------------------------------- output (original spec §6, revised spec §6.3)
 def write_text(path: Path, text: str) -> None:
+    """Writes a text file atomically (through a temp file)."""
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
 
 
 def write_hourly(path: Path, w: pd.DataFrame, results: dict, faces: pd.DataFrame) -> None:
+    """Writes the hourly results of every scenario, hour and face to a CSV file."""
     frames = []
     for scen, res in results.items():
         n, K = res["M"].shape
@@ -830,7 +848,7 @@ def write_hourly(path: Path, w: pd.DataFrame, results: dict, faces: pd.DataFrame
 
 
 def write_summary(path: Path, summary: pd.DataFrame, notes: list[str]) -> None:
-    """notes는 '# '로 시작하는 주석 줄로 머리에 적는다 (pandas: read_csv(..., comment='#'))."""
+    """Writes notes at the top as comment lines starting with '# ' (pandas: read_csv(..., comment='#'))."""
     out = summary.copy()
     for c in out.columns:
         if c.startswith("months_rh80"):
@@ -844,20 +862,21 @@ def write_summary(path: Path, summary: pd.DataFrame, notes: list[str]) -> None:
 
 
 def runs(mask: np.ndarray) -> list[list[int]]:
-    """True 구간을 [시작 인덱스, 길이] 목록으로."""
+    """Runs of True as a list of [start index, length]."""
     d = np.diff(np.concatenate([[0], mask.astype(int), [0]]))
     starts, ends = np.flatnonzero(d == 1), np.flatnonzero(d == -1)
     return [[int(s), int(e - s)] for s, e in zip(starts, ends)]
 
 
 def _num(v, d=3):
+    """Rounds a number, or returns None for missing values."""
     return None if v is None or pd.isna(v) else round(float(v), d)
 
 
 def viewer_json(period: dict, session: dict, station: dict, w: pd.DataFrame, results: dict,
                 all_faces: pd.DataFrame, sim_faces: pd.DataFrame, summary: pd.DataFrame, dv: dict,
                 cfg: dict, provisional: str | None, warnings: list) -> dict:
-    """HTML 뷰어용. 시간 축은 start + step_h, 면별 값은 시나리오별 길이 n 배열. 제외 면은 null."""
+    """Data for the HTML viewer. Time axis = start + step_h; per-face values are length-n arrays per scenario. Excluded faces are null."""
     r = lambda a, d: np.round(np.asarray(a, dtype=float), d).tolist()
     col = {k: j for j, k in enumerate(sim_faces.index)}
     faces = []
@@ -914,6 +933,7 @@ def viewer_json(period: dict, session: dict, station: dict, w: pd.DataFrame, res
 
 
 def save_plots(out_dir: Path, label: str, w: pd.DataFrame, results: dict, faces: pd.DataFrame) -> None:
+    """Saves a PNG chart of M and surface RH over the period for each face."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -940,6 +960,7 @@ def save_plots(out_dir: Path, label: str, w: pd.DataFrame, results: dict, faces:
 
 
 def print_ranking(label: str, summary: pd.DataFrame, provisional: str | None) -> None:
+    """Prints the faces ranked by their worst-scenario peak mold index."""
     if provisional:
         print(f"\n*** {provisional} ***")
     print(f"\n[{label}] 면별 최대 곰팡이 지수 M (중앙 / 보수 시나리오, M >= 3: 육안 관찰 수준)")
@@ -950,8 +971,9 @@ def print_ranking(label: str, summary: pd.DataFrame, provisional: str | None) ->
               f"결로 {s['condensation_hours_central']:4d}h / {s['condensation_hours_worst']:4d}h{mark}")
 
 
-# ---------------------------------------------------------------- 실행
+# ---------------------------------------------------------------- main
 def main() -> None:
+    """Parses the arguments, extracts f and dv_max from the scans, simulates each period and writes the results."""
     ap = argparse.ArgumentParser(description="표면 온습도·곰팡이(VTT) 시뮬레이터")
     ap.add_argument("--session-dir", required=True, help="logger.py 세션 폴더")
     ap.add_argument("--config", help="config.yaml (기본: 세션 폴더 또는 이 스크립트 폴더의 config.yaml)")
@@ -991,7 +1013,7 @@ def main() -> None:
           f"관측소 {station} {station_info.get('name', '')} ({station_info['source']}) | "
           f"지중온도 {depth} m | 기간 {[p['label'] for p in periods]}")
 
-    # 1. 측정 시점 외기·지중온도 -> dv_max, 면별 f (불확도와 판정 포함)
+    # 1. outdoor air and ground temperature at scan time -> dv_max and f per face (with uncertainty and judgment)
     faces = face_table(scans, session, cfg, warnings)
     valid = filter_scans(scans, faces, cfg, warnings)
     times = scans.groupby("scan_id")["timestamp"].first()
@@ -1014,7 +1036,7 @@ def main() -> None:
           f"sigma {_num(dv['sigma'], 2)}) | f 판정 {fres['judgment'].value_counts().to_dict()} | "
           f"시뮬레이션 면 {len(sim_faces)}개")
 
-    # 2. 기간별 시뮬레이션 (중앙·보수 시나리오)
+    # 2. simulation for each period (central and worst scenarios)
     index_entries, compare = [], {}
     for p in periods:
         pwarn: list[str] = []

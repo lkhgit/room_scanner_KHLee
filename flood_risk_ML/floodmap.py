@@ -1,10 +1,10 @@
 """
-서울시 침수 빈도 히트맵 웹앱.
+Seoul flood frequency heat map web app.
 
-data/flood_grid.geojson (build_grid.py로 생성)을 읽어 folium 지도로 렌더링한다.
-격자 셀을 클릭하면 침수 빈도/침수심 이력이 팝업으로 표시된다.
+Reads data/flood_grid.geojson (made by build_grid.py) and renders it as a folium map.
+Clicking a grid cell shows its flood frequency and depth history in a popup.
 
-실행:
+Run:
     & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" floodmap.py
     http://127.0.0.1:5000
 """
@@ -22,17 +22,18 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GRID_PATH = os.path.join(BASE_DIR, "data", "flood_grid.geojson")
 SEOUL_CENTER = [37.5665, 126.9780]
 
-# 서울 대략 bbox: 검색 결과를 서울 인근으로 편향(강제 필터는 아님)
+# rough bounding box of Seoul: biases search results towards Seoul (not a hard filter)
 SEOUL_VIEWBOX = "126.734,37.715,127.269,37.413"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 NOMINATIM_USER_AGENT = "SeoulFloodHeatmap/1.0 (https://github.com/lkhgit/room_scanner_KHLee)"
-NOMINATIM_MIN_INTERVAL_SEC = 1.1  # Nominatim 사용 정책(초당 1건) 준수
+NOMINATIM_MIN_INTERVAL_SEC = 1.1  # follows the Nominatim usage policy (one request per second)
 
 app = Flask(__name__)
 _last_geocode_call = 0.0
 
 
 def load_grid():
+    """Reads the grid GeoJSON and adds the display texts for the tooltip and popup."""
     with open(GRID_PATH, "r", encoding="utf-8") as f:
         grid = json.load(f)
 
@@ -58,10 +59,10 @@ def load_grid():
 
 
 class AddressSearchControl(folium.MacroElement):
-    """주소/장소명을 입력하면 지도를 해당 위치로 flyTo 시키는 검색 컨트롤.
+    """Search control that flies the map to an address or place name.
 
-    지도 iframe 내부(folium 지도 객체 자신)에 렌더링되어야 Leaflet map 변수에
-    직접 접근할 수 있으므로, 바깥 Flask 템플릿이 아니라 이 MacroElement로 구현한다.
+    It must be rendered inside the map iframe (the folium map object itself) to reach the Leaflet map variable
+    directly, so it is a MacroElement rather than part of the outer Flask template.
     """
 
     _template = Template(
@@ -128,11 +129,13 @@ class AddressSearchControl(folium.MacroElement):
     )
 
     def __init__(self):
+        """Registers the control under a fixed name."""
         super().__init__()
         self._name = "AddressSearchControl"
 
 
 def build_map(grid):
+    """Builds the folium map with the coloured grid, tooltip, popup, colour scale and search box."""
     scores = [f["properties"]["weighted_score"] for f in grid["features"]]
     colormap = cm.LinearColormap(
         colors=["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"],
@@ -149,6 +152,7 @@ def build_map(grid):
     )
 
     def style_function(feature):
+        """Colours a cell by its risk score."""
         score = feature["properties"]["weighted_score"]
         return {
             "fillColor": colormap(score),
@@ -158,6 +162,7 @@ def build_map(grid):
         }
 
     def highlight_function(_feature):
+        """Style of a cell under the mouse."""
         return {"weight": 2, "color": "#000000", "fillOpacity": 0.9}
 
     folium.GeoJson(
@@ -186,6 +191,7 @@ def build_map(grid):
 
 @app.route("/api/geocode")
 def geocode():
+    """Looks up a place with Nominatim (at most one request per second) and returns up to 5 results."""
     global _last_geocode_call
 
     query = request.args.get("q", "").strip()
@@ -229,6 +235,7 @@ def geocode():
 
 @app.route("/")
 def index():
+    """Renders the page with the flood heat map."""
     grid = load_grid()
     fmap = build_map(grid)
     map_html = fmap._repr_html_()

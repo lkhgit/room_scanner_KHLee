@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
 """
-촬영 사진 -> 정거방형(equirectangular, 2:1) 파노라마
+Captured photos -> equirectangular (2:1) panorama
 
-panorama.py가 저장한 meta.json의 모터 각도(yaw/pitch)로 각 사진을 구면에 투영해 이어붙인다.
-calibrate.py로 구한 카메라 보정값(화각, 광학 중심, 장착 기울어짐 roll, 렌즈 왜곡)이 있으면 자동으로 쓴다.
-  찾는 순서: --calib 로 지정한 파일 -> 촬영 폴더의 calib.json -> 상위 폴더의 camera_calib.json
-보정값이 없으면 화각만으로 이어붙인다 (meta.json 또는 --hfov/--vfov).
-refine.py가 만든 meta_refined.json(사진별 방향 보정)이 있으면 그것을 가장 먼저 쓴다.
+Projects each photo onto a sphere using the motor angles (yaw/pitch) in panorama.py's meta.json and blends them.
+Camera calibration from calibrate.py (field of view, optical centre, mounting roll, lens distortion) is used
+automatically when found.
+  Search order: the file given with --calib -> calib.json in the capture folder -> camera_calib.json in the parent folder
+Without calibration, only the field of view is used (from meta.json or --hfov/--vfov).
+meta_refined.json from refine.py (per-photo direction corrections) is used first when it exists.
 
-실행:  python stitch_panorama.py captures/20261020_195800
-결과:  같은 폴더에 panorama.jpg (기본 4096x2048), panorama_1024x512.jpg (HorizonNet 입력 크기)
+Run:     python stitch_panorama.py captures/20261020_195800
+Result:  panorama.jpg (4096x2048 by default) and panorama_1024x512.jpg (HorizonNet input size) in the same folder
 
-옵션:
-  --calib FILE     사용할 보정 파일 지정
-  --no-calib       보정 파일을 무시하고 화각만 사용
-  --raw            meta_refined.json(사진별 방향 보정)을 무시
-  --width 4096     출력 가로 크기 (세로는 절반)
-  --hfov / --vfov  화각 직접 지정 (지정하면 보정 파일은 쓰지 않음)
-  --yaw-sign -1    좌우가 뒤집혀 이어지면 -1
-  --rotate 0       사진이 누워 있거나 뒤집혀 찍혔으면 90 / 180 / 270 (보정 파일과 함께는 사용 불가)
-  --feather 2      겹치는 부분 섞기 강도 (클수록 사진 가운데를 더 신뢰)
-  --out NAME       저장 파일 이름 (기본 panorama.jpg)
+Options:
+  --calib FILE     calibration file to use
+  --no-calib       ignore calibration files and use only the field of view
+  --raw            ignore meta_refined.json (per-photo direction corrections)
+  --width 4096     output width (height is half)
+  --hfov / --vfov  field of view given directly (calibration files are then not used)
+  --yaw-sign -1    -1 if the photos join mirrored left-right
+  --rotate 0       90 / 180 / 270 if the photos were taken sideways or upside down (not with a calibration file)
+  --feather 2      blending strength in the overlaps (higher trusts the photo centres more)
+  --out NAME       output file name (default panorama.jpg)
 """
 import argparse
 import json
@@ -32,11 +33,13 @@ import numpy as np
 
 
 def load_meta(folder):
+    """Reads meta.json from a capture folder."""
     with open(os.path.join(folder, "meta.json"), encoding="utf-8") as f:
         return json.load(f)
 
 
 def load_image(path, rotate=0):
+    """Reads a photo and rotates it by 0, 90, 180 or 270 degrees."""
     img = cv2.imread(path, cv2.IMREAD_COLOR)
     if img is None:
         raise RuntimeError(f"사진을 읽을 수 없음: {path}")
@@ -50,12 +53,12 @@ def load_image(path, rotate=0):
 
 
 def vfov_from_hfov(hfov, w, h):
-    """정사각형 픽셀이라고 보고 사진 비율로 세로 화각 계산 (4:3이면 85 -> 약 69)"""
+    """Vertical field of view from the photo's aspect ratio, assuming square pixels (4:3: 85 -> about 69)."""
     return math.degrees(2 * math.atan(math.tan(math.radians(hfov) / 2) * h / w))
 
 
 def camera_from_fov(hfov, vfov, w, h):
-    """보정값 없이 화각만으로 만든 카메라 모델"""
+    """Camera model from the field of view alone, without calibration."""
     f = (w / 2) / math.tan(math.radians(hfov) / 2)
     fy = (h / 2) / math.tan(math.radians(vfov) / 2)
     return dict(f=f, aspect=fy / f, cx=(w - 1) / 2, cy=(h - 1) / 2,
@@ -63,7 +66,7 @@ def camera_from_fov(hfov, vfov, w, h):
 
 
 def camera_from_calib(c, w, h):
-    """calib.json -> 카메라 모델 (사진 크기가 다르면 비례 조정)"""
+    """calib.json -> camera model (scaled if the photo size differs)."""
     cw, ch = c.get("image_size", [w, h])
     sx = w / cw
     return dict(f=c["f_px"] * sx, aspect=c["aspect"], cx=c["cx"] * sx, cy=c["cy"] * (h / ch),
@@ -72,6 +75,7 @@ def camera_from_calib(c, w, h):
 
 
 def find_calib(folder, explicit=None):
+    """Finds the calibration file: the given one, the folder's calib.json, or camera_calib.json in the parent folder."""
     if explicit:
         return explicit
     for p in (os.path.join(folder, "calib.json"),
@@ -82,7 +86,7 @@ def find_calib(folder, explicit=None):
 
 
 def resolve_fov(meta, folder, hfov, vfov, rotate):
-    """회전 전 원본 사진 기준 화각을 정하고, 회전했으면 가로·세로를 바꾼다."""
+    """Field of view of the original (unrotated) photo, with width and height swapped if rotated."""
     raw = cv2.imread(os.path.join(folder, meta["images"][0]["file"]), cv2.IMREAD_COLOR)
     h0, w0 = raw.shape[:2]
     if hfov is None:
@@ -97,7 +101,7 @@ def resolve_fov(meta, folder, hfov, vfov, rotate):
 
 
 def _undistort_radius_inverse(ru, k1, k2, iters=8):
-    """보정된 반경 ru -> 사진 위 반경 rd  (ru = rd * (1 + k1 rd^2 + k2 rd^4) 를 뉴턴법으로 풂)"""
+    """Corrected radius ru -> radius rd on the photo (solves ru = rd * (1 + k1 rd^2 + k2 rd^4) with Newton's method)."""
     if k1 == 0 and k2 == 0:
         return ru
     rd = ru.copy()
@@ -110,9 +114,10 @@ def _undistort_radius_inverse(ru, k1, k2, iters=8):
 
 
 class EquirectGrid:
-    """출력 파노라마의 각 픽셀 방향을 미리 계산해 둔다."""
+    """Precomputes the direction of every pixel of the output panorama."""
 
     def __init__(self, W):
+        """Precomputes the longitude and latitude of the panorama pixels for an output width W."""
         self.W = W
         self.H = W // 2
         lon = ((np.arange(W, dtype=np.float32) + 0.5) / W * 2 - 1) * np.pi
@@ -121,18 +126,18 @@ class EquirectGrid:
         self.cos_lon = np.cos(lon)[None, :]
 
     def warp(self, img, yaw_deg, pitch_deg, hfov=None, vfov=None, feather=2.0, cam=None, extra_roll_deg=0.0):
-        """사진 한 장을 파노라마 좌표로 투영. (시작 행, 끝 행, 투영된 사진, 가중치) 또는 None"""
+        """Projects one photo into panorama coordinates. Returns (first row, end row, projected photo, weights) or None."""
         h, w = img.shape[:2]
         if cam is None:
             cam = camera_from_fov(hfov, vfov, w, h)
         f, fy = cam["f"], cam["f"] * cam["aspect"]
         cx, cy = cam["cx"], cam["cy"]
-        roll = cam["roll"] + math.radians(extra_roll_deg)   # 장착 roll + 사진별 roll 보정
+        roll = cam["roll"] + math.radians(extra_roll_deg)   # mounting roll + per-photo roll correction
 
         psi = math.radians(yaw_deg)
         th = math.radians(pitch_deg)
 
-        # 이 사진이 닿을 수 있는 행만 계산 (속도·메모리 절약)
+        # only the rows this photo can reach are computed (saves time and memory)
         half_diag = math.atan(math.hypot((w / 2) / f, (h / 2) / fy)) * (1 + max(0.0, cam["k1"]))
         margin = 0.05 + abs(roll) + abs(cam["myaw"])
         lat_hi, lat_lo = th + half_diag + margin, th - half_diag - margin
@@ -146,13 +151,13 @@ class EquirectGrid:
         dy = np.broadcast_to(sl, dx.shape)
         dz = cl * self.cos_lon
 
-        # 리그 좌표축: 앞(f), 오른쪽(r), 위(u)
+        # rig axes: forward (f), right (r), up (u)
         cp, sp, ct, st = math.cos(psi), math.sin(psi), math.cos(th), math.sin(th)
         Z = dx * (ct * sp) + dy * st + dz * (ct * cp)
         X = dx * cp - dz * sp
         Y = dx * (-st * sp) + dy * ct + dz * (-st * cp)
 
-        # 카메라 장착 오차 되돌리기: v_cam = Ry(myaw)^T Rz(roll)^T (X, Y, Z)
+        # undo the camera mounting error: v_cam = Ry(myaw)^T Rz(roll)^T (X, Y, Z)
         if roll or cam["myaw"]:
             cr, sr = math.cos(roll), math.sin(roll)
             X, Y = cr * X + sr * Y, -sr * X + cr * Y
@@ -163,10 +168,10 @@ class EquirectGrid:
         Zs = np.where(valid, Z, 1.0)
         xu, yu = X / Zs, Y / Zs
 
-        # 렌즈 왜곡 적용 (보정된 좌표 -> 실제 사진 좌표)
+        # apply lens distortion (corrected coordinates -> actual photo coordinates)
         if cam["k1"] or cam["k2"]:
             k1, k2 = cam["k1"], cam["k2"]
-            # 사진 모서리까지의 반경 안에서만 역변환이 유일하므로 그 범위로 제한
+            # the inverse is unique only within the radius of the photo corners, so limit it to that
             rd_max = math.hypot(max(cx, w - 1 - cx) / f, max(cy, h - 1 - cy) / fy)
             ru_max = rd_max * (1 + k1 * rd_max ** 2 + k2 * rd_max ** 4)
             ru = np.sqrt(xu * xu + yu * yu)
@@ -182,7 +187,7 @@ class EquirectGrid:
         if not valid.any():
             return None
 
-        # 가장자리로 갈수록 작아지는 가중치 -> 이음매가 부드럽게 섞임
+        # weights fall off towards the edges -> seams blend smoothly
         wx = np.clip(1 - np.abs(mx - (w - 1) / 2) / (w / 2), 0, 1)
         wy = np.clip(1 - np.abs(my - (h - 1) / 2) / (h / 2), 0, 1)
         wgt = (wx * wy) ** feather
@@ -196,6 +201,7 @@ class EquirectGrid:
 
 def stitch(folder, width, hfov, vfov, yaw_sign, rotate, feather, verbose=True,
            calib_path=None, use_calib=True, use_refined=True):
+    """Stitches all photos of a capture folder into one panorama; returns the image and the covered-pixel mask."""
     meta = load_meta(folder)
 
     cam = None
@@ -247,6 +253,7 @@ def stitch(folder, width, hfov, vfov, yaw_sign, rotate, feather, verbose=True,
 
 
 def main():
+    """Parses the arguments, stitches the panorama and saves it at full size and at 1024x512."""
     ap = argparse.ArgumentParser()
     ap.add_argument("folder", help="captures/<날짜_시간> 폴더")
     ap.add_argument("--calib", default=None)

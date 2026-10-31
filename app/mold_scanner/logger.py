@@ -1,36 +1,38 @@
 #!/usr/bin/env python3
 """
-표면 온습도 측정 기기 PC 로거
+PC logger for the surface temperature/humidity device
 
-surface_scan.ino(v2)의 시리얼 출력을 받아 세션 폴더에 저장한다.
-    <out-dir>/<session>/session.yaml   세션 정보 (방위각, 장소, 센서, 재료 등급)
-    <out-dir>/<session>/scans.csv      스캔 데이터 (한 행 = 한 스캔의 한 면)
-    <out-dir>/<session>/serial_raw.log 수신한 원본 줄 전체 (문제 추적용)
-    <out-dir>/<session>/outdoor.csv    스캔 직후 가져온 초단기실황 외기 (스캔 시각과 직전 23시간)
+Reads the serial output of surface_scan.ino (v2) and saves it in a session folder.
+    <out-dir>/<session>/session.yaml   session info (heading, site, sensors, material class)
+    <out-dir>/<session>/scans.csv      scan data (one row = one face of one scan)
+    <out-dir>/<session>/serial_raw.log every line received, as is (for troubleshooting)
+    <out-dir>/<session>/outdoor.csv    outdoor air from the ultra-short-term observations fetched right after a scan
+                                       (the scan hour and the 23 hours before)
 
-초단기실황은 기상청 단기예보 조회서비스로 가져오며, 인증키는 kma.py에 적는다.
-격자는 site.lat/lon -> 관측소 좌표 -> 장소 이름(카카오 지오코딩) 순서로 정해 session.yaml의
-grid에 적는다. 키가 없거나 요청이 실패해도 측정은 계속한다. 끄려면 --no-ncst.
+The ultra-short-term observations come from the KMA short-term forecast service; the key goes in kma.py.
+The grid cell is chosen from site.lat/lon, then the station coordinates, then the place name (Kakao geocoding),
+and written to `grid` in session.yaml. Measuring continues if the key is missing or a request fails.
+Turn this off with --no-ncst.
 
-사용법
+Usage
     pip install pyserial pyyaml
     python logger.py --port COM3 --session banjiha_A --site "망원동 반지하" --lat 37.556 --lon 126.906
-    (macOS/Linux 포트 예: /dev/tty.usbmodem14101, /dev/ttyACM0)
+    (port examples on macOS/Linux: /dev/tty.usbmodem14101, /dev/ttyACM0)
 
-    로거가 포트를 열면 아두이노 우노가 리셋되고, 기기가 #INFO,ready를 보내면
-    로거가 n(스캔 1회)을 보낸다. 기본값은 스캔 1회를 저장한 뒤 로거가 종료되는 것이다.
-    여러 번 측정하려면 --scans 24 --interval 60 처럼 횟수와 간격(분)을 준다.
-    --no-start를 주면 자동으로 보내지 않고 사용자가 n을 입력해 시작한다.
-    포트를 열기 전에 기기를 원위치(센서 정면·수평)에 두어야 한다.
-    로거 없이 전원만 넣으면 기기는 움직이지 않고 대기한다.
+    Opening the port resets the Arduino UNO; when the device sends #INFO,ready the logger sends n (one scan).
+    By default the logger saves one scan and exits.
+    For several scans give a count and an interval in minutes, e.g. --scans 24 --interval 60.
+    With --no-start nothing is sent automatically and the user types n to start.
+    Put the device in its home pose (sensor facing forward, level) before opening the port.
+    Powered without the logger, the device does not move and waits.
 
-실행 중 키보드 입력 (입력 후 Enter)
-    n 지금 스캔   s 스캔 즉시 정지(원위치 복귀 후 로거 종료)   q 로거 종료
+Keyboard input while running (followed by Enter)
+    n scan now   s stop the scan at once (returns home, then the logger exits)   q quit the logger
 
-같은 --session 이름으로 다시 실행하면 기존 scans.csv 뒤에 이어 쓰고,
-scan_id는 기존 최대값 다음부터 이어지도록 다시 매긴다.
+Running again with the same --session name appends to the existing scans.csv,
+and scan_id is renumbered to continue after the largest existing one.
 
-테스트: --replay <파일> 로 시리얼 대신 저장된 출력 텍스트를 읽는다.
+Testing: --replay <file> reads saved output text instead of the serial port.
 """
 
 import argparse
@@ -51,11 +53,13 @@ N_FACES = 20
 
 
 def now_iso() -> str:
+    """Returns the current time in KST as an ISO string."""
     return datetime.now(KST).isoformat(timespec="seconds")
 
 
 # ---------------------------------------------------------------- session.yaml
 def load_or_create_session(path: Path, args) -> dict:
+    """Loads session.yaml, or creates a new session from the command-line arguments."""
     if path.exists():
         with path.open(encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
@@ -77,6 +81,7 @@ def load_or_create_session(path: Path, args) -> dict:
 
 
 def save_session(path: Path, session: dict) -> None:
+    """Writes session.yaml atomically (through a temp file)."""
     tmp = path.with_suffix(".yaml.tmp")
     with tmp.open("w", encoding="utf-8") as f:
         yaml.safe_dump(session, f, allow_unicode=True, sort_keys=False)
@@ -86,6 +91,7 @@ def save_session(path: Path, session: dict) -> None:
 # ---------------------------------------------------------------- scans.csv
 class ScanWriter:
     def __init__(self, path: Path):
+        """Opens scans.csv, writing the header for a new file or finding the last scan_id of an existing one."""
         self.path = path
         self.offset = 0
         if path.exists() and path.stat().st_size > 0:
@@ -97,7 +103,7 @@ class ScanWriter:
                 csv.writer(f).writerow(COLUMNS)
 
     def write_scan(self, rows: list[list[str]], timestamp: str) -> int:
-        """한 스캔의 20행을 한 번에 기록한다. 기록된 scan_id를 돌려준다."""
+        """Writes the 20 rows of one scan at once and returns the scan_id it was saved under."""
         scan_id = self.offset + int(rows[0][0])
         with self.path.open("a", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
@@ -106,16 +112,17 @@ class ScanWriter:
         return scan_id
 
 
-# ---------------------------------------------------------------- 파서
+# ---------------------------------------------------------------- parser
 class Parser:
-    """아두이노의 한 줄 단위 프로토콜을 해석한다."""
+    """Interprets the Arduino's line-based protocol."""
 
     def __init__(self, writer: ScanWriter, session: dict, session_path: Path, on_ready=None):
+        """Sets up the parser for one session; the callbacks are filled in by the controller."""
         self.on_ready = on_ready
-        # 스캔 결과 알림: on_scan_done(outcome) — outcome은 "saved", "discarded", "aborted"
+        # scan result callback: on_scan_done(outcome), outcome is "saved", "discarded" or "aborted"
         self.on_scan_done = None
         self.on_scan_begin = None
-        self.on_scan = None                # 스캔을 저장한 직후 on_scan(timestamp) - 초단기실황 수집
+        self.on_scan = None                # on_scan(timestamp) right after a scan is saved - collects the ultra-short-term observations
         self.writer = writer
         self.session = session
         self.session_path = session_path
@@ -124,9 +131,11 @@ class Parser:
         self.scans_saved = 0
 
     def log(self, msg: str) -> None:
+        """Prints a timestamped log line."""
         print(f"[{datetime.now(KST):%H:%M:%S}] {msg}", flush=True)
 
     def handle(self, line: str) -> None:
+        """Passes one serial line to the meta-line or data-line handler."""
         line = line.strip()
         if not line:
             return
@@ -136,6 +145,7 @@ class Parser:
             self.handle_data(line)
 
     def handle_meta(self, line: str) -> None:
+        """Handles a # line: header check, heading, scan begin/end, abort and device info."""
         parts = line.split(",")
         tag = parts[0]
         if tag == "#HDR":
@@ -177,6 +187,7 @@ class Parser:
             self.log(f"알 수 없는 메타 줄: {line}")
 
     def handle_data(self, line: str) -> None:
+        """Checks one data row and keeps it for the scan in progress."""
         row = next(csv.reader([line]))
         if len(row) != len(COLUMNS):
             self.log(f"경고: 열 개수 {len(row)} (기대 {len(COLUMNS)}) - 무시: {line}")
@@ -193,6 +204,7 @@ class Parser:
         self.buf.append(row)
 
     def finish_scan(self, scan_id: str) -> None:
+        """Saves the finished scan if it has all 20 faces, otherwise discards it."""
         outcome = "discarded"
         if scan_id != self.cur_id:
             self.log(f"경고: SCAN_END {scan_id}가 진행 중 스캔 {self.cur_id}와 다름 - 버림")
@@ -216,17 +228,18 @@ class Parser:
             self.on_scan_done(outcome)
 
 
-# ---------------------------------------------------------------- 스캔 횟수·간격 관리
+# ---------------------------------------------------------------- scan count and interval
 class Controller:
-    """정해진 횟수만큼 n을 보내고, 다 저장하면 종료 신호를 낸다.
+    """Sends n the given number of times and signals the end once all scans are saved.
 
-    scans=0이면 q를 입력할 때까지 계속한다. 버려진 스캔은 횟수에 넣지 않고
-    바로 다시 시도하며, 연속 MAX_RETRY번 버려지면 종료한다.
+    With scans=0 it goes on until q is typed. A discarded scan does not count and is retried at once;
+    after MAX_RETRY discarded scans in a row it stops.
     """
     MAX_RETRY = 3
 
     def __init__(self, ser, parser: Parser, scans: int, interval_min: float,
                  auto_start: bool, stop: threading.Event, clock=time.monotonic):
+        """Sets up the scan schedule and hooks into the parser's callbacks."""
         self.ser, self.parser, self.scans = ser, parser, scans
         self.interval_s = interval_min * 60
         self.stop, self.clock = stop, clock
@@ -239,6 +252,7 @@ class Controller:
             parser.on_ready = self.send_scan
 
     def send_scan(self) -> None:
+        """Sends the scan command n to the device."""
         self.ser.write(b"n")
         self.next_at = None
         done = self.parser.scans_saved
@@ -246,9 +260,11 @@ class Controller:
         self.parser.log(f"스캔 명령(n) 전송 ({done + 1}/{total})")
 
     def on_begin(self) -> None:
+        """Remembers when the scan started."""
         self.begin_at = self.clock()
 
     def on_done(self, outcome: str) -> None:
+        """Decides what comes next after a scan: retry, wait for the next one, or stop."""
         if outcome == "aborted":
             self.parser.log("정지 명령으로 스캔이 중단되어 로거를 종료함")
             self.stop.set()
@@ -273,11 +289,13 @@ class Controller:
         self.parser.log(f"다음 스캔까지 {wait / 60:.0f}분 대기 (q+Enter로 종료)")
 
     def tick(self) -> None:
+        """Sends the next scan command once its time has come."""
         if self.next_at is not None and self.clock() >= self.next_at:
             self.send_scan()
 
 
 def run_serial(ser, parser: Parser, ctrl: Controller, stop: threading.Event, feed) -> None:
+    """Reads serial lines until stopped, feeding each one and ticking the controller."""
     while not stop.is_set():
         data = ser.readline()
         if data:
@@ -285,9 +303,10 @@ def run_serial(ser, parser: Parser, ctrl: Controller, stop: threading.Event, fee
         ctrl.tick()
 
 
-# ---------------------------------------------------------------- 초단기실황 (측정 시점 외기)
+# ---------------------------------------------------------------- ultra-short-term observations (outdoor air at scan time)
 def resolve_logger_grid(session: dict, session_path: Path, log):
-    """초단기실황 격자. site.lat/lon -> 관측소 좌표 -> 장소 이름 지오코딩. 정하면 session.yaml에 적는다."""
+    """Grid cell for the ultra-short-term observations: site.lat/lon, then station coordinates, then geocoding the place name.
+    Writes it to session.yaml once found."""
     import kma
     site = session.get("site") or {}
     got = kma.resolve_grid(site, session.get("asos_station"))
@@ -314,19 +333,22 @@ def resolve_logger_grid(session: dict, session_path: Path, log):
 
 
 class NcstCollector:
-    """스캔 시각과 직전 23시간의 초단기실황 중 outdoor.csv에 없는 것을 백그라운드로 가져온다."""
+    """Fetches, in the background, the observations for the scan hour and the 23 hours before that are not in outdoor.csv yet."""
 
     def __init__(self, path: Path, grid: dict, log):
+        """Sets up the collector for one outdoor.csv and grid cell."""
         self.path, self.grid, self.log = path, grid, log
         self.lock = threading.Lock()
         self.threads: list[threading.Thread] = []
 
     def __call__(self, ts: str) -> None:
+        """Starts fetching the observations for a scan in a background thread."""
         t = threading.Thread(target=self.work, args=(ts,), daemon=True)
         t.start()
         self.threads.append(t)
 
     def work(self, ts: str) -> None:
+        """Fetches the scan hour and the 23 hours before and adds the missing ones to outdoor.csv."""
         import kma
         end = kma.parse_kst(ts).replace(minute=0, second=0, microsecond=0)
         hours = [end - timedelta(hours=i) for i in range(24)]
@@ -341,6 +363,7 @@ class NcstCollector:
                 self.log(f"경고: 초단기실황 수집 실패 - {e}")
 
     def wait(self, timeout_s: float = 120) -> None:
+        """Waits for any fetch still running before the logger exits."""
         pending = [t for t in self.threads if t.is_alive()]
         if pending:
             self.log("초단기실황 수집이 끝나기를 기다리는 중")
@@ -348,8 +371,9 @@ class NcstCollector:
                 t.join(timeout_s)
 
 
-# ---------------------------------------------------------------- 실행
+# ---------------------------------------------------------------- main
 def stdin_forwarder(ser, stop: threading.Event) -> None:
+    """Forwards the n and s commands typed on the keyboard to the device, and q to stop."""
     for line in sys.stdin:
         cmd = line.strip().lower()
         if cmd == "q":
@@ -362,6 +386,7 @@ def stdin_forwarder(ser, stop: threading.Event) -> None:
 
 
 def main() -> None:
+    """Parses the arguments, sets up the session, and runs the logger on a serial port or a replay file."""
     ap = argparse.ArgumentParser(description="표면 온습도 측정 기기 로거")
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--port", help="시리얼 포트 (예: COM3, /dev/ttyACM0)")
@@ -407,6 +432,7 @@ def main() -> None:
         parser.log(f"기존 데이터에 이어 씀 (scan_id {writer.offset + 1}부터)")
 
     def feed(line: str) -> None:
+        """Logs one raw serial line and passes it to the parser."""
         raw.write(f"{now_iso()}\t{line.rstrip()}\n")
         raw.flush()
         parser.handle(line)

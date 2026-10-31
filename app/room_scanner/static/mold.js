@@ -9,6 +9,7 @@ const M_MAX = 6; // VTT mold index scale 0-6
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MODE_NAMES = { off: "HVAC off", heat: "Heating", cool: "Cooling" };
 
+// Turns an HTML string into a DOM element.
 const el = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; };
 
 // Rig direction (az from -z towards +x, el up) -> unit vector in the model frame.
@@ -18,6 +19,7 @@ const dirOf = (az, el) => { const a = az * Math.PI / 180, e = el * Math.PI / 180
 const VERT = `
 varying vec3 vPos; varying vec2 vUv;
 void main() { vPos = position; vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+// Returns the fragment shader for nf faces: colours each surface point by the mold index of the face it points at.
 const FRAG = (nf) => `
 #define NF ${nf}
 uniform sampler2D uMap; uniform float uHasMap; uniform float uAlpha; uniform float uMax;
@@ -44,6 +46,7 @@ void main() {
   gl_FragColor = vec4(col, 1.0);
 }`;
 
+// Makes a text label sprite (used for the N/E/S/W compass letters).
 function sprite(text, color) {
   const c = document.createElement("canvas"); c.width = c.height = 128;
   const g = c.getContext("2d"); g.font = "bold 84px sans-serif"; g.fillStyle = color; g.textAlign = "center"; g.textBaseline = "middle";
@@ -52,10 +55,12 @@ function sprite(text, color) {
   s.scale.setScalar(0.5); return s;
 }
 
+// Mounts the mold viewer (3D model, time slider, face details) into container and returns its controls.
 export function mountMold(container, roomId, data, room) {
   const faces = data.faces, n = data.time.n;
   const [y0, mo0, d0, h0] = data.time.start.match(/\d+/g).map(Number);
   const baseMs = Date.UTC(y0, mo0 - 1, d0, h0);
+  // Formats an hour index of the simulation as a date and time in KST.
   const fmtTime = (i) => { const d = new Date(baseMs + i * 3600e3);
     return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()} ${String(d.getUTCHours()).padStart(2, "0")}:00 KST`; };
 
@@ -80,6 +85,7 @@ export function mountMold(container, roomId, data, room) {
       <div class="facebox" id="facebox" hidden></div>
     </div></div>`);
   container.appendChild(root);
+  // Returns the first element inside the viewer that matches a CSS selector.
   const $ = (s) => root.querySelector(s);
 
   // ---- scene
@@ -97,6 +103,7 @@ export function mountMold(container, roomId, data, room) {
   const shared = { uAlpha: { value: state.alpha }, uMax: { value: M_MAX }, uDir: { value: faceDirs },
                    uM: { value: uM }, uSel: { value: -1 } };
   const frag = FRAG(faces.length);
+  // Makes the shader material for one mesh, with the room photo as its texture if there is one.
   const makeMat = (map) => {
     if (map) { map.colorSpace = THREE.NoColorSpace; map.needsUpdate = true; }   // sample the photo as stored (sRGB)
     return new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader: frag, side: THREE.FrontSide,
@@ -105,6 +112,7 @@ export function mountMold(container, roomId, data, room) {
   let pickables = [];
   const compass = new THREE.Group(); scene.add(compass);
 
+  // Places the N/E/S/W compass letters and the north arrow around the model.
   function placeCompass(r) {
     compass.clear();
     [["N", 0, "#ff6b6b"], ["E", 90, "#8a93a3"], ["S", 180, "#8a93a3"], ["W", 270, "#8a93a3"]].forEach(([t, b, col]) => {
@@ -113,6 +121,7 @@ export function mountMold(container, roomId, data, room) {
     });
     compass.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 0, -r * 0.7), r * 0.3, 0xff6b6b, r * 0.08, r * 0.05));
   }
+  // Points the camera at an object, from inside the room or from outside.
   function frame(obj, inward) {
     const box = new THREE.Box3().setFromObject(obj), c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length();
     controls.target.copy(c);
@@ -121,6 +130,7 @@ export function mountMold(container, roomId, data, room) {
     placeCompass(s * 0.55);
   }
 
+  // Shows the bare icosahedron of measured faces when there is no room model, with a note why.
   function showIcosahedron(note) {
     const G = data.geometry;
     const pos = [];
@@ -152,9 +162,11 @@ export function mountMold(container, roomId, data, room) {
       : "This scan has no photos, so there is no 3D room model; the measured faces are shown instead.");
   }
 
+  // Rotates the model so that north points the right way for the room's heading.
   function setHeading() { group.rotation.y = -((room.params.heading_deg || 0) * Math.PI / 180); }
   setHeading();
 
+  // Resizes the renderer when the canvas size changes.
   function resize() {
     const w = canvas.clientWidth, h = canvas.clientHeight;
     if (!w || !h) return;
@@ -168,9 +180,12 @@ export function mountMold(container, roomId, data, room) {
 
   // ---- data -> colours / text
   const faceById = new Map(faces.map((f) => [f.face, f]));
+  // Returns the hourly weather and indoor series.
   const S = () => data.series;
+  // Returns a face's mold index at the current time for the current scenario.
   const colorAt = (f) => f[state.scen].M[state.t];
 
+  // Updates the colours and the readouts for the current time.
   function refresh() {
     faceIds.forEach((fid, k) => { uM[k] = colorAt(faceById.get(fid)); });
     $("#tlabel").textContent = fmtTime(state.t);
@@ -198,6 +213,7 @@ export function mountMold(container, roomId, data, room) {
   $("#warns").innerHTML = data.warnings.length ? "<ul style='padding-left:16px;margin:0'>" + data.warnings.map((w) => `<li>${w}</li>`).join("") + "</ul>" : "None.";
 
   // ---- selected face panel
+  // Draws the selected face's details and its chart of M, surface RH or surface temperature over the year.
   function drawFace() {
     const box = $("#facebox");
     if (state.face == null) { box.hidden = true; return; }
@@ -226,6 +242,7 @@ export function mountMold(container, roomId, data, room) {
     const tx = state.t / (n - 1) * w; g.strokeStyle = "#e8731a"; g.beginPath(); g.moveTo(tx, 0); g.lineTo(tx, h); g.stroke();
   }
 
+  // Highlights the selected face on the model.
   function highlight() { shared.uSel.value = faceIds.indexOf(state.face); }
 
   // ---- interaction

@@ -1,39 +1,41 @@
 """
-sun_calculator.py — 창문 구멍이 뚫린 방 3D 모델(room.glb)에 실내로 들어오는 직사광을 계산하고,
-                    결과를 브라우저로 보는 HTML(sun_viewer.html)로 저장하는 스크립트
-    ("panorama to model_oneformer.py"의 출력 폴더를 그대로 입력으로 씀)
+sun_calculator.py — calculates the direct sunlight entering a 3D room model with window openings (room.glb)
+                    and saves the result as an HTML page for the browser (sun_viewer.html)
+    (takes the output folder of "panorama to model_oneformer.py" as its input)
 
-    (가상환경) .venv\\Scripts\\python.exe sun_calculator.py out\\panorama_test_2 --heading 180
-    (가상환경) .venv\\Scripts\\python.exe sun_calculator.py out\\panorama_test_2 --heading 180 --date 2026-10-18 --time 14:30
+    (virtual env) .venv\\Scripts\\python.exe sun_calculator.py out\\panorama_test_2 --heading 180
+    (virtual env) .venv\\Scripts\\python.exe sun_calculator.py out\\panorama_test_2 --heading 180 --date 2026-10-18 --time 14:30
 
-알고리즘은 SunForm(github.com/JakeWhiteArchitecture/sunform, MIT License)의 sunform_engine.py를 따름.
-    태양 위치(Spencer 1971) → 면을 최대 변 길이로 잘게 나눔 → 꼭짓점을 법선 방향으로 1cm 띄운 점에서
-    태양 쪽으로 광선(Möller–Trumbore) → 안 막히면 그 시각에 빛을 받음 → 시간 누적 + 라플라시안 스무딩
-    바뀐 점
-    - 실내 분석이라 법선은 SunForm처럼 '무조건 위'가 아니라 면의 감김 방향(방 안쪽)을 그대로 씀.
-      면 뒤쪽에서 오는 빛(법선·태양 ≤ 0)은 광선을 쏘지 않고 그늘로 처리.
-    - 시각은 SunForm(UTC)과 달리 로컬 시각(--tz, 기본 +9 = 한국)으로 받음.
-    - 광선 교차는 numpy로 벡터화 (태양 방향이 같은 시각의 모든 꼭짓점을 한꺼번에 계산).
-    - 빛을 받은 광선이 어느 창문을 지나왔는지 찾아서 창문별 유입량과 '바닥까지 들어온 깊이'를 계산.
+The algorithm follows sunform_engine.py of SunForm (github.com/JakeWhiteArchitecture/sunform, MIT License):
+    sun position (Spencer 1971) -> split surfaces down to a maximum edge length -> from each vertex offset 1 cm
+    along its normal, cast a ray towards the sun (Möller–Trumbore) -> if nothing blocks it, it is sunlit at that
+    time -> accumulate over time + Laplacian smoothing
+    Changes
+    - For indoor analysis the normal is not "always up" as in SunForm but follows the surface winding (into the room).
+      Light from behind a surface (normal · sun ≤ 0) casts no ray and counts as shade.
+    - Times are local (--tz, default +9 = Korea) instead of SunForm's UTC.
+    - Ray intersection is vectorised with numpy (all vertices at one time step share the sun direction).
+    - Finds which window each sunlit ray came through, giving the inflow per window and how deep it reaches the floor.
 
-처리 순서
-    1. 태양 위치: --date로 준 날짜(들), 없으면 동지·춘추분·하지(--year)에 대해 --step(분) 간격으로 고도/방위각 계산, 해가 뜬 시각만 남김
-       + 맑은 날 직달일사량(DNI, W/m²) 추정 (Meinel 모델, 공기질량은 Kasten–Young)
-    2. room.glb 읽기: 재질 이름(wall_XX / floor / ceiling)으로 면을 구분. 모든 면이 그림자를 만드는 물체.
-    3. 분석 격자: 바닥 + 벽(--ceiling 이면 천장도)을 최대 변 --grid(m) 이하로 쪼갬
-    4. 시각마다 광선 판정 → 빛 받은 꼭짓점(비트), 일사 세기 = DNI × cos(입사각)
-    5. 빛 받은 광선을 창문 사각형(layout.json의 windows)과 교차 → 창문별 유입 W, 바닥 도달 깊이
-    6. 저장: sun_viewer.html (모델 + 결과가 모두 들어 있는 한 파일), sun_hours.json (요약 수치)
+Steps
+    1. Sun position: altitude/azimuth every --step minutes on the --date day(s), or else on the solstices and
+       equinoxes of --year; only times with the sun up are kept
+       + clear-sky direct normal irradiance (DNI, W/m²) (Meinel model, air mass by Kasten–Young)
+    2. Read room.glb: surfaces are told apart by material name (wall_XX / floor / ceiling). Every surface casts shadows.
+    3. Analysis grid: floor + walls (and ceiling with --ceiling) split until no edge is longer than --grid (m)
+    4. Ray test at every time step -> sunlit vertices (bits), irradiance = DNI × cos(angle of incidence)
+    5. Intersect sunlit rays with the window rectangles (windows in layout.json) -> inflow W per window, depth on the floor
+    6. Save: sun_viewer.html (one file holding the model and the results), sun_hours.json (summary figures)
 
-가정
-    맑은 날 직사광만 계산 (하늘의 산란광·반사광은 없음). 창밖 건물/나무 등 바깥 장애물은 없다고 봄.
-    창문은 유리 없이 뚫린 구멍으로 봄 (유리 투과율을 곱하지 않음).
+Assumptions
+    Clear-sky direct sunlight only (no diffuse sky light or reflections). No outside obstacles such as buildings or trees.
+    Windows are open holes without glass (no glass transmittance applied).
 
-좌표계
-    room.glb는 y-up: +X = 파노라마 가운데 열의 오른쪽, +Y = 위, −Z = 파노라마 가운데 열(u=0)이 바라보는 방향.
-    --heading = 파노라마 가운데 열이 바라보는 실제 방위각(북 0°, 동 90°, 시계방향).
-    태양 방위각에서 heading을 빼서 모델 좌표의 태양 방향을 만듦 (SunForm의 X=동, Y=위, −Z=북과 같은 규약).
-    heading을 주지 않으면 layout.json의 "heading_deg" 값을 쓰고, 그것도 없으면 0°(가운데 열 = 북쪽)로 가정.
+Coordinates
+    room.glb is y-up: +X = right of the panorama's centre column, +Y = up, −Z = the direction the centre column (u=0) faces.
+    --heading = the real bearing the panorama's centre column faces (north 0°, east 90°, clockwise).
+    The sun direction in model coordinates is the sun azimuth minus heading (same convention as SunForm's X=east, Y=up, −Z=north).
+    Without --heading the "heading_deg" in layout.json is used, and without that 0° (centre column = north) is assumed.
 """
 
 import argparse
@@ -49,70 +51,71 @@ from scipy.sparse import coo_matrix
 
 SEASONS = [("winter", "동지", 12, 21), ("equinox", "춘·추분", 3, 21), ("summer", "하지", 6, 21)]
 DIR8 = ["북", "북동", "동", "남동", "남", "남서", "서", "북서"]
-SOLAR_CONST = 1361.0        # 대기권 밖 태양 상수 (W/m²)
-RAY_OFFSET = 0.01           # 광선 시작점을 면에서 띄우는 거리 (m), SunForm과 같음
-MIN_T = 1e-4                # 이보다 가까운 교차는 무시 (자기 자신과의 교차 방지), SunForm과 같음
+SOLAR_CONST = 1361.0        # solar constant outside the atmosphere (W/m²)
+RAY_OFFSET = 0.01           # distance the ray start is lifted off the surface (m), same as SunForm
+MIN_T = 1e-4                # intersections closer than this are ignored (avoids self-intersection), same as SunForm
 
 
 def to_yup(p):
-    """z-up (x, y, z) → y-up (x, z, -y).  panorama to model_oneformer.py 의 to_yup 과 같음."""
+    """z-up (x, y, z) → y-up (x, z, -y). Same as to_yup in panorama to model_oneformer.py."""
     p = np.asarray(p, float)
     return np.stack([p[..., 0], p[..., 2], -p[..., 1]], -1)
 
 
-# ================================================================== 1. 태양
+# ================================================================== 1. sun
 def get_sun_positions(lat, lon, day, step_min, tz):
     """
-    SunForm get_sun_positions 포팅 (Spencer 1971 푸리에 급수).
-    hour 는 로컬 시각: UTC = hour - tz.  반환: 해가 뜬 시각의 (hour, 방위각°, 고도°) 배열.
-    방위각은 북 0°, 시계방향 (동 90°, 남 180°).
+    Port of SunForm's get_sun_positions (Spencer 1971 Fourier series).
+    hour is local time: UTC = hour - tz. Returns arrays (hour, azimuth°, altitude°) for the times the sun is up.
+    Azimuth is north 0°, clockwise (east 90°, south 180°).
     """
     doy = day.timetuple().tm_yday
     B = 2 * math.pi * (doy - 1) / 365
     decl = (0.006918 - 0.399912 * math.cos(B) + 0.070257 * math.sin(B)
             - 0.006758 * math.cos(2 * B) + 0.000907 * math.sin(2 * B)
-            - 0.002697 * math.cos(3 * B) + 0.00148 * math.sin(3 * B))           # 적위 (rad)
+            - 0.002697 * math.cos(3 * B) + 0.00148 * math.sin(3 * B))           # declination (rad)
     eot = 229.18 * (0.000075 + 0.001868 * math.cos(B) - 0.032077 * math.sin(B)
-                    - 0.014615 * math.cos(2 * B) - 0.040849 * math.sin(2 * B))  # 균시차 (분)
+                    - 0.014615 * math.cos(2 * B) - 0.040849 * math.sin(2 * B))  # equation of time (minutes)
 
     hour = np.arange(0, 24, step_min / 60)
     solar_time = hour - tz + (eot + 4 * lon) / 60
-    ha = np.radians((solar_time - 12) * 15)                                     # 시간각
+    ha = np.radians((solar_time - 12) * 15)                                     # hour angle
     la = math.radians(lat)
     sin_alt = math.sin(la) * math.sin(decl) + math.cos(la) * math.cos(decl) * np.cos(ha)
     alt = np.arcsin(np.clip(sin_alt, -1, 1))
     cos_az = (math.sin(decl) - np.sin(alt) * math.sin(la)) / np.maximum(np.cos(alt) * math.cos(la), 1e-12)
     az = np.degrees(np.arccos(np.clip(cos_az, -1, 1)))
-    az = np.where(ha > 0, 360 - az, az)                                         # 오후는 서쪽
+    az = np.where(ha > 0, 360 - az, az)                                         # west in the afternoon
     up = alt > 0
     return hour[up], az[up], np.degrees(alt[up])
 
 
 def sun_direction(az, alt, heading):
-    """방위각/고도 → 모델 좌표(y-up)에서 태양을 향하는 단위벡터. heading만큼 돌려서 모델에 맞춤."""
+    """Azimuth/altitude → unit vector towards the sun in model coordinates (y-up), rotated by heading to fit the model."""
     a, h = np.radians(np.asarray(az) - heading), np.radians(alt)
     return np.stack([np.sin(a) * np.cos(h), np.sin(h), -np.cos(a) * np.cos(h)], -1)
 
 
 def clear_sky_dni(alt):
-    """맑은 날 직달일사(W/m²) 추정. Meinel: DNI = 1361·0.7^(AM^0.678), 공기질량 AM은 Kasten–Young 식."""
+    """Clear-sky direct normal irradiance (W/m²). Meinel: DNI = 1361·0.7^(AM^0.678), air mass AM from Kasten–Young."""
     z = 90 - np.asarray(alt, float)
     am = 1 / (np.cos(np.radians(z)) + 0.50572 * (96.07995 - z) ** -1.6364)
     return SOLAR_CONST * 0.7 ** (am ** 0.678)
 
 
 def bearing_of(v, heading):
-    """모델 좌표의 수평 방향 v → 실제 방위각(북 0°, 시계방향)."""
+    """Horizontal direction v in model coordinates → real bearing (north 0°, clockwise)."""
     return (heading + math.degrees(math.atan2(v[0], -v[2]))) % 360
 
 
 def dir8(b):
+    """Returns the 8-point compass name for a bearing."""
     return DIR8[int((b + 22.5) // 45) % 8]
 
 
-# ================================================================== 2~3. 메쉬
+# ================================================================== 2-3. mesh
 def load_surfaces(glb_path):
-    """room.glb → {재질 이름: 삼각형 배열 (N,3,3)}. 노드 변환을 적용하고 감김 방향은 그대로 둠."""
+    """room.glb → {material name: triangle array (N,3,3)}. Node transforms are applied and winding is kept."""
     scene = trimesh.load(glb_path, force="scene", process=False)
     out = {}
     for node in scene.graph.nodes_geometry:
@@ -126,8 +129,8 @@ def load_surfaces(glb_path):
 
 def subdivide_to_max_edge(tris, max_edge):
     """
-    SunForm subdivide_to_max_edge 포팅: 가장 긴 변이 max_edge보다 긴 삼각형은 그 변의 중점에서 둘로 나눔.
-    꼭짓점 순서를 돌려 가장 긴 변이 (r0, r1)이 되게 한 뒤 나누므로 감김 방향(법선 방향)이 유지됨.
+    Port of SunForm's subdivide_to_max_edge: a triangle whose longest edge exceeds max_edge is split in two at that edge's midpoint.
+    The vertices are rotated so the longest edge is (r0, r1) before splitting, which keeps the winding (normal direction).
     """
     done, cur = [], np.asarray(tris, float)
     while len(cur):
@@ -145,7 +148,7 @@ def subdivide_to_max_edge(tris, max_edge):
 
 
 def build_unique_vertices(tris, quant=1e-4):
-    """SunForm build_unique_vertices 포팅: 0.1 mm 격자로 반올림해서 같은 점을 하나로 합침."""
+    """Port of SunForm's build_unique_vertices: rounds to a 0.1 mm grid and merges identical points."""
     flat = tris.reshape(-1, 3)
     key = np.round(flat / quant).astype(np.int64)
     _, first, inv = np.unique(key, axis=0, return_index=True, return_inverse=True)
@@ -154,11 +157,13 @@ def build_unique_vertices(tris, quant=1e-4):
 
 def build_analysis_mesh(surfaces, names, grid):
     """
-    분석할 면들을 쪼개서 하나의 꼭짓점 배열로 합침. 면마다 꼭짓점을 따로 둠(모서리에서 법선이 섞이지 않게).
-    법선 = 면의 감김 방향(방 안쪽). 꼭짓점 면적 = 붙은 삼각형 면적의 1/3씩 (SunForm compute_vertex_voronoi_areas).
-    광선 시작점 = 꼭짓점 + 법선×RAY_OFFSET + (면 중심 쪽으로 면을 따라)×RAY_OFFSET.
-    면 안쪽으로도 미는 이유: 바닥-벽 모서리의 꼭짓점은 법선 방향으로만 띄우면 시작점이 벽 평면 위에 놓여
-    벽과의 교차 거리가 0이 되어(MIN_T 이하) 막히지 않음 → 창문 없는 벽 밑까지 빛을 받는 오류.
+    Splits the surfaces to analyse and joins them into one vertex array. Each surface keeps its own vertices
+    (so normals do not mix at corners).
+    Normal = surface winding (into the room). Vertex area = 1/3 of each attached triangle (SunForm compute_vertex_voronoi_areas).
+    Ray start = vertex + normal×RAY_OFFSET + (along the surface towards its centre)×RAY_OFFSET.
+    Why also push along the surface: a vertex on the floor-wall edge lifted only along its normal starts on the wall
+    plane, so its intersection with the wall is at distance 0 (below MIN_T) and is not counted as blocked → light
+    would wrongly reach the foot of walls without windows.
     """
     pos, idx, nrm, area, sid, org = [], [], [], [], [], []
     off = 0
@@ -171,8 +176,8 @@ def build_analysis_mesh(surfaces, names, grid):
         a = np.zeros(len(v))
         for k in range(3):
             np.add.at(a, f[:, k], np.linalg.norm(cr, axis=1) / 6)
-        inward = (v * a[:, None]).sum(0) / a.sum() - v              # 꼭짓점 → 면 중심
-        inward -= np.outer(inward @ n, n)                            # 면 위 성분만
+        inward = (v * a[:, None]).sum(0) / a.sum() - v              # vertex → surface centre
+        inward -= np.outer(inward @ n, n)                            # in-plane part only
         inward /= np.maximum(np.linalg.norm(inward, axis=1, keepdims=True), 1e-9)
         pos.append(v); idx.append(f + off); nrm.append(np.repeat(n[None], len(v), 0))
         area.append(a); sid.append(np.full(len(v), i))
@@ -183,7 +188,7 @@ def build_analysis_mesh(surfaces, names, grid):
 
 
 def smooth_vertex_field(values, idx, iterations=2, lam=0.5):
-    """SunForm smooth_vertex_field 포팅: 이웃 평균과 섞어 그림자 경계의 톱니를 완화. 평평한 값은 그대로."""
+    """Port of SunForm's smooth_vertex_field: blends with the neighbour mean to soften jagged shadow edges. Flat values stay as they are."""
     n = len(values)
     i, j = idx.ravel(), idx[:, [1, 2, 0]].ravel()
     A = coo_matrix((np.ones(2 * len(i)), (np.r_[i, j], np.r_[j, i])), shape=(n, n)).tocsr()
@@ -196,17 +201,17 @@ def smooth_vertex_field(values, idx, iterations=2, lam=0.5):
     return v
 
 
-# ================================================================== 4. 광선
+# ================================================================== 4. rays
 def first_hit(O, d, tris, min_t=MIN_T, chunk=4096):
     """
-    Möller–Trumbore (SunForm ray_triangle_intersect)를 벡터화. 모든 광선의 방향 d가 같다는 점을 이용.
-    반환: 광선마다 가장 가까운 교차 거리 t (없으면 inf), 교차한 삼각형 번호 (없으면 -1).
+    Vectorised Möller–Trumbore (SunForm ray_triangle_intersect), using the fact that all rays share direction d.
+    Returns for each ray the nearest intersection distance t (inf if none) and the triangle hit (-1 if none).
     """
     v0 = tris[:, 0]
     e1, e2 = tris[:, 1] - v0, tris[:, 2] - v0
     p = np.cross(d, e2)
     det = (e1 * p).sum(1)
-    ok = np.abs(det) > 1e-10                              # 광선과 평행한 삼각형 제외
+    ok = np.abs(det) > 1e-10                              # skip triangles parallel to the ray
     ids, v0, e1, e2, p, inv = np.nonzero(ok)[0], v0[ok], e1[ok], e2[ok], p[ok], 1 / det[ok]
     t_best = np.full(len(O), np.inf)
     id_best = np.full(len(O), -1)
@@ -227,7 +232,7 @@ def first_hit(O, d, tris, min_t=MIN_T, chunk=4096):
 
 
 def analyze_day(day, a, mesh, occluders, windows):
-    """하루 동안 시각마다 빛 받은 꼭짓점과 통계를 계산."""
+    """Computes the sunlit vertices and statistics for every time step of one day."""
     pos, idx, nrm, area, sid, org, floor_id = mesh
     hours, az, alt = get_sun_positions(a.lat, a.lon, day, a.step, a.tz)
     dirs = sun_direction(az, alt, a.heading)
@@ -241,13 +246,13 @@ def analyze_day(day, a, mesh, occluders, windows):
     win_of_tri = np.r_[np.arange(W), np.arange(W)]
 
     lit = np.zeros((S, V), bool)
-    E_sum = np.zeros(V)                                   # 하루 일사량 Wh/m²
+    E_sum = np.zeros(V)                                   # daily irradiation Wh/m²
     st = {"total_W": [], "flux_W": [], "floor_m2": [], "wall_m2": [],
           "win_W": [[] for _ in windows], "win_flux_W": [[] for _ in windows], "win_depth": [[] for _ in windows]}
     for s in range(S):
         d = dirs[s]
         cosi = nrm @ d
-        cand = np.nonzero(cosi > 0)[0]                    # 면 앞쪽에서 오는 빛만
+        cand = np.nonzero(cosi > 0)[0]                    # only light from in front of the surface
         O = org[cand]
         t, _ = first_hit(O, d, occluders)
         free = ~np.isfinite(t)
@@ -255,14 +260,14 @@ def analyze_day(day, a, mesh, occluders, windows):
         lit[s, on] = True
         e = dni[s] * cosi[on]                             # W/m²
         E_sum[on] += e * dt
-        p_on = e * area[on]                               # 꼭짓점이 받는 W
+        p_on = e * area[on]                               # W received by each vertex
 
         st["total_W"].append(float(p_on.sum()))
         st["floor_m2"].append(float(area[on][is_floor[on]].sum()))
         st["wall_m2"].append(float(area[on][~is_floor[on]].sum()))
 
         wid = np.full(len(on), -1)
-        if W and len(on):                                 # 빛 받은 광선이 지나온 창문
+        if W and len(on):                                 # the window each sunlit ray came through
             _, tri = first_hit(O_on, d, win_tris, min_t=0)
             wid = np.where(tri >= 0, win_of_tri[np.maximum(tri, 0)], -1)
         flux = 0.0
@@ -282,17 +287,20 @@ def analyze_day(day, a, mesh, occluders, windows):
                 hours_v=hours_v, E_sum=E_sum, stats=st, dt=dt)
 
 
-# ================================================================== 6. 저장
+# ================================================================== 6. save
 def b64(arr, dtype):
+    """Encodes an array as base64 with the given dtype."""
     return base64.b64encode(np.ascontiguousarray(arr, dtype=dtype).tobytes()).decode()
 
 
 def hhmm(h):
+    """Formats hours as HH:MM."""
     m = int(round(h * 60))
     return f"{m // 60:02d}:{m % 60:02d}"
 
 
 def main():
+    """Parses the arguments, loads the room, calculates sunlight for each day and writes sun_hours.json and sun_viewer.html."""
     ap = argparse.ArgumentParser(description="방 3D 모델(room.glb) 실내 직사광 계산 → sun_viewer.html")
     ap.add_argument("room", help="panorama to model_oneformer.py 출력 폴더 (또는 그 안의 room.glb)")
     ap.add_argument("--heading", type=float, default=None,
@@ -326,7 +334,7 @@ def main():
             a.heading = 0.0
             print("경고: --heading 이 없고 layout.json 에도 heading_deg 가 없어 0°(파노라마 가운데 = 북쪽)로 가정합니다")
 
-    # 2. 메쉬
+    # 2. mesh
     surfaces = load_surfaces(glb_path)
     occluders = np.concatenate(list(surfaces.values()))
     wall_names = sorted(n for n in surfaces if n.startswith("wall_"))
@@ -335,7 +343,7 @@ def main():
         raise SystemExit(f"{glb_path} 에 floor 재질이 없습니다")
     pos, idx, nrm, area, sid, org = build_analysis_mesh(surfaces, names, a.grid)
     floor_id = names.index("floor")
-    if nrm[sid == floor_id][0, 1] < 0:                    # 감김이 뒤집힌 모델이면 전부 뒤집음
+    if nrm[sid == floor_id][0, 1] < 0:                    # if the model's winding is reversed, flip everything
         print("경고: 바닥 법선이 아래를 향해 모든 면의 법선을 뒤집습니다")
         org -= 2 * nrm * RAY_OFFSET
         nrm, idx = -nrm, idx[:, ::-1].copy()
@@ -371,9 +379,9 @@ def main():
     if not windows:
         print("경고: layout.json 에 창문이 없습니다 (직사광이 들어오지 않음)")
 
-    # 1, 4, 5. 날짜별 계산
+    # 1, 4, 5. calculation for each day
     days = [(f"date{i}", "지정일", datetime.strptime(d, "%Y-%m-%d").date()) for i, d in enumerate(a.date)]
-    if not days:                                          # --date가 없을 때만 절기 3개
+    if not days:                                          # the three seasonal days only when --date is not given
         days = [(k, lab, date(a.year, m, dd)) for k, lab, m, dd in SEASONS]
     bytes_per_step = (len(pos) + 7) // 8
     day_data, summary = [], []
@@ -414,7 +422,7 @@ def main():
             "summary": summary[-1],
         })
 
-    # 6. 저장
+    # 6. save
     print("[3/4] sun_hours.json 저장")
     meta = {"source": str(glb_path), "heading_deg": a.heading, "lat": a.lat, "lon": a.lon, "tz": a.tz,
             "step_min": a.step, "grid_m": a.grid,

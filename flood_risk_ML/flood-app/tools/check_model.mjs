@@ -1,8 +1,8 @@
-// 앱의 계산(js/model.js, js/rain.js)이 Python 계산과 같은지 확인한다.
-// 기준값은 check_reference.py가 만든 data/../tools/reference.json (scenario_params.json 원본 정밀도로 계산).
+// Checks that the app's calculations (js/model.js, js/rain.js) match the Python ones.
+// The reference values are tools/reference.json, written by check_reference.py (full precision of scenario_params.json).
 //
-// 실행:
-//   & "C:\Users\KHLee\AppData\Local\Python\bin\python.exe" "flood-app\tools\check_reference.py"
+// Run:
+//   py "flood-app\tools\check_reference.py"     (from flood_risk_ML)
 //   node "flood-app\tools\check_model.mjs"
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -11,7 +11,9 @@ import { compute, gridSummary } from "../js/model.js";
 import { reconstruct, idwWeights, rainField } from "../js/rain.js";
 
 const TOOLS = dirname(fileURLToPath(import.meta.url));
+// Reads a JSON file.
 const read = (p) => JSON.parse(readFileSync(p, "utf-8"));
+// Reads a JSON file from the app's data folder.
 const data = (n) => read(join(TOOLS, "..", "data", n));
 
 const grids = data("grids.json"), model = data("model.json"), pca = data("pca.json"), meta = data("meta.json");
@@ -32,7 +34,7 @@ for (const sc of ref.scenarios) {
   console.log(`${sc.label.padEnd(8)} 평균 최대 차이 ${maxDiff.toExponential(1)}, 분위수 최대 차이 ${qDiff.toExponential(1)} -> ${pass ? "통과" : "실패"}`);
 }
 
-// 슬라이더 양 끝 조합에서 강우가 음수가 아니고 24h ≥ 1h
+// At every combination of slider ends, rainfall is not negative and 24h ≥ 1h
 const K = meta.slider_min.length;
 let bad = 0;
 for (let m = 0; m < 2 ** K; m++) {
@@ -43,13 +45,13 @@ for (let m = 0; m < 2 ** K; m++) {
 ok &&= bad === 0;
 console.log(`슬라이더 양 끝 조합 강우 이상값 ${bad}개 -> ${bad === 0 ? "통과" : "실패"}`);
 
-// 2022년 PC를 넣으면 2022년 실제 권역 강우가 PCA 4개 축 근사로 돌아와야 한다 (설명 분산 94%)
+// Feeding in 2022's PCs should give back 2022's real regional rainfall, approximately (4 PCA axes explain 94% of the variance)
 const y2022 = data("years.json").find((y) => y.year === 2022);
 const rec = reconstruct(pca, y2022.pc);
 const err = Math.max(...rec.max24h.map((v, r) => Math.abs(v - y2022.max24h[r])));
 console.log(`2022년 24h 강우 복원 최대 오차 ${err.toFixed(1)}mm (PC1–PC3 근사, 참고값)`);
 
-// IDW 지도: 가중치 합 = 1, 값은 권역 최솟값~최댓값 사이, 관측소 바로 위는 그 권역 값
+// IDW map: weights sum to 1, values lie between the regional min and max, and right on a station the value is its region's
 const b = { south: 37.42, west: 126.76, north: 37.70, east: 127.19 };
 const W = 120, H = 90, st = meta.stations;
 const w = idwWeights(st, b, W, H, 5);

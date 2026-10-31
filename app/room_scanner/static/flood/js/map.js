@@ -1,14 +1,14 @@
-// 지도: 강우 레이어(IDW 보간 래스터), 침수 확률 레이어, 구 경계, 선택 마커, 범례
+// Map: rain layer (IDW-interpolated raster), flood probability layer, district borders, selection marker, legend
 
 import { REGION_NAMES, RAIN_SCALE, idwWeights, rainField } from "./rain.js";
 
 export const FLOOD_BINS = [0.01, 0.05, 0.10, 0.25, 0.50];
 export const FLOOD_COLORS = ["#fff5c2", "#fed976", "#feb24c", "#fd8d3c", "#e31a1c", "#800026"];
 const FLOOD_LABELS = ["Under 1%", "1–5%", "5–10%", "10–25%", "25–50%", "50% or more"];
-// 파란색 순차 색 (ColorBrewer Blues). 강우량에 따라 연속 보간
+// Sequential blues (ColorBrewer Blues), interpolated continuously with the rainfall
 const BLUES = ["#f7fbff", "#deebf7", "#c6dbef", "#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"]
   .map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
-const RASTER_WIDTH = 480;  // 보간 래스터 가로 픽셀 (약 90m/픽셀)
+const RASTER_WIDTH = 480;  // width of the interpolated raster in pixels (about 90 m per pixel)
 
 let map, gridLayer, gridPolys, guLayer, stationLayer, stationMarks, rainOverlay, rainCard, legend, toggle;
 let marker, cellOutline;
@@ -18,21 +18,26 @@ let lastRain = null;
 let stations = [];
 let handlers = {};
 
+// Returns the legend colour for a flood probability.
 export function floodColor(p) {
   let i = 0;
   while (i < FLOOD_BINS.length && p >= FLOOD_BINS[i]) i++;
   return FLOOD_COLORS[i];
 }
 
+// Returns the RGB colour for a rainfall amount on the blue scale.
 function rainRgb(mm, metric) {
   const t = Math.min(1, Math.max(0, mm / RAIN_SCALE[metric])) * (BLUES.length - 1);
   const i = Math.min(BLUES.length - 2, Math.floor(t)), f = t - i;
   return BLUES[i].map((c, k) => Math.round(c + (BLUES[i + 1][k] - c) * f));
 }
+// Returns the CSS colour for a rainfall amount.
 const rainCss = (mm, metric) => `rgb(${rainRgb(mm, metric).join(",")})`;
 
+// Returns the latitude/longitude bounding box of a GeoJSON.
 function geoBounds(geojson) {
   let south = 90, north = -90, west = 180, east = -180;
+  // Walks nested coordinate arrays and widens the bounds.
   const walk = (c) => {
     if (typeof c[0] === "number") {
       west = Math.min(west, c[0]); east = Math.max(east, c[0]);
@@ -43,11 +48,12 @@ function geoBounds(geojson) {
   return { south, west, north, east };
 }
 
-// 서울 경계 안쪽 픽셀만 1인 마스크
+// Mask that is set only for pixels inside the Seoul border.
 function buildMask(geojson, b, width, height) {
   const c = document.createElement("canvas");
   c.width = width; c.height = height;
   const ctx = c.getContext("2d");
+  // Converts longitude/latitude to a pixel position on the mask canvas.
   const px = ([lon, lat]) => [((lon - b.west) / (b.east - b.west)) * width,
                               ((b.north - lat) / (b.north - b.south)) * height];
   ctx.beginPath();
@@ -67,6 +73,7 @@ function buildMask(geojson, b, width, height) {
   return mask;
 }
 
+// Creates the rain raster canvas over Seoul with its IDW weights and border mask.
 function initRaster(seoul) {
   const b = geoBounds(seoul);
   const lat0 = ((b.south + b.north) / 2) * Math.PI / 180;
@@ -84,6 +91,7 @@ function initRaster(seoul) {
   });
 }
 
+// Creates the Leaflet map with its layers, rain card, legend and rain/flood toggle.
 export function init(el, grids, seoul, stationList, on) {
   handlers = on;
   stations = stationList;
@@ -138,6 +146,7 @@ export function init(el, grids, seoul, stationList, on) {
   map.on("click", (e) => handlers.onClick?.(e.latlng.lat, e.latlng.lng));
 }
 
+// Shows the rain or the flood layer and the matching legend.
 export function setMode(mode) {
   toggle.getContainer().querySelectorAll("button").forEach((b) =>
     b.classList.toggle("on", b.dataset.mode === mode));
@@ -151,10 +160,12 @@ export function setMode(mode) {
   cellOutline?.bringToFront();
 }
 
+// Colours every grid cell by its mean flood probability.
 export function showFlood(mean) {
   for (let g = 0; g < gridPolys.length; g++) gridPolys[g].setStyle({ fillColor: floodColor(mean[g]) });
 }
 
+// Paints the rain raster from regional rainfall values, inside the Seoul border only.
 function paintRaster(values) {
   const { ctx, width, height, weights, mask } = raster;
   const field = rainField(weights, values);
@@ -168,6 +179,7 @@ function paintRaster(values) {
   rainOverlay.setUrl(raster.canvas.toDataURL());
 }
 
+// Shows a rainfall scenario on the map, the station tooltips and the regional rain card.
 export function showRain(rain) {
   lastRain = rain;
   const values = rain[rainMetric];
@@ -190,12 +202,14 @@ export function showRain(rain) {
     <p class="card-note">Map colors are interpolated by inverse-distance weighting (IDW) from 27 stations, each assigned its region's rainfall.</p>`;
 }
 
+// Draws the flood probability legend.
 function renderFloodLegend() {
   legend.getContainer().innerHTML = `<div class="card-title">Flood probability if this rain falls</div>` +
     FLOOD_LABELS.map((l, i) => `<div class="lg-row"><i style="background:${FLOOD_COLORS[i]}"></i>${l}</div>`).join("") +
     `<div class="card-note">No color = no recorded flooding, 2010–2025</div>`;
 }
 
+// Draws the rainfall legend for the selected metric.
 function renderRainLegend() {
   const max = RAIN_SCALE[rainMetric];
   const stops = BLUES.map((c, i) => `rgb(${c.join(",")}) ${(i / (BLUES.length - 1)) * 100}%`).join(",");
@@ -204,6 +218,7 @@ function renderRainLegend() {
     <div class="ramp-lab"><span>0</span><span>${max / 2}</span><span>${max}mm or more</span></div>`;
 }
 
+// Marks the selected place and outlines its grid cell.
 export function setPlace(place, corners) {
   marker?.remove();
   cellOutline?.remove();
@@ -217,10 +232,12 @@ export function setPlace(place, corners) {
   }
 }
 
+// Zooms the map to a point.
 export function flyTo(lat, lng) {
   map.setView([lat, lng], Math.max(map.getZoom(), 16));
 }
 
+// Tells Leaflet that the map's size changed.
 export function invalidate() {
   map?.invalidateSize();
 }

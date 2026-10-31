@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """
-사진별 방향 자동 보정
+Automatic per-photo direction correction
 
-모터가 처지거나 기어 유격으로 어긋나서, 사진이 명령한 각도와 다른 곳을 보고 찍힌 경우를 사진 내용으로 바로잡는다.
-  1단계  겹치는 사진끼리 특징점(SIFT)을 맞춰, 카메라 값과 사진마다의 yaw/pitch/roll 오차를 함께 추정
-  2단계  특징점이 거의 없는 사진(흰 벽·천장)은 이웃 사진과 윤곽이 가장 잘 겹치는 각도를 직접 탐색
-  3단계  그래도 정할 수 없으면 같은 행 사진들의 보정값 중앙값을 사용
-결과는 meta_refined.json으로 저장되고 (원본 meta.json은 그대로), stitch_panorama.py가 자동으로 읽어 쓴다.
+When motor sag or gear play made a photo look somewhere other than the commanded angle, this corrects it from the
+photo content.
+  Step 1  match feature points (SIFT) between overlapping photos and estimate the camera values together with each
+          photo's yaw/pitch/roll error
+  Step 2  for photos with hardly any features (white walls, ceiling), search directly for the angle at which their
+          outlines best match the neighbouring photos
+  Step 3  if that still fails, use the median correction of the other photos in the same row
+The result is saved as meta_refined.json (meta.json itself is left as it is), which stitch_panorama.py reads automatically.
 
-필요: calibrate.py로 만든 calib.json 또는 camera_calib.json (없으면 meta.json의 화각에서 시작)
-실행: python refine.py captures/20261021_010000
+Needs: calib.json or camera_calib.json from calibrate.py (otherwise starts from the field of view in meta.json)
+Run: python refine.py captures/20261021_010000
 """
 import argparse
 import itertools
@@ -25,14 +28,14 @@ from scipy.sparse import lil_matrix
 from calibrate import Rz, rig_rotation, mount_rotation, pixels_to_cam_rays
 from stitch_panorama import EquirectGrid, camera_from_calib, find_calib
 
-MIN_POINTS = 15          # 이보다 대응점이 적은 사진은 특징점만으로 정하지 않음
-WARN_DEG = 15            # 보정량이 이보다 크면 경고
-GATE_PX = 320            # 모터 각도로 예측한 위치에서 이만큼 이상 떨어진 매칭은 버림 (반복 무늬 오매칭 제거)
+MIN_POINTS = 15          # photos with fewer matched points are not fixed from features alone
+WARN_DEG = 15            # warn if a correction is larger than this
+GATE_PX = 320            # drop matches this far from the position predicted from the motor angles (removes mismatches on repeating patterns)
 
 
-# ---------------------------------------------------------------- 카메라 모델 공용
+# ---------------------------------------------------------------- shared camera model
 def cam_rays_to_pixels(p, v):
-    """카메라 좌표 광선 -> 픽셀 (렌즈 왜곡 포함)"""
+    """Rays in camera coordinates -> pixels (with lens distortion)."""
     x, y = v[:, 0] / v[:, 2], v[:, 1] / v[:, 2]
     ru = np.hypot(x, y)
     rd = ru.copy()
@@ -44,6 +47,7 @@ def cam_rays_to_pixels(p, v):
 
 
 def load_camera(folder, meta, W, H):
+    """Loads the camera calibration, or builds a starting camera from the field of view in meta.json."""
     path = find_calib(folder)
     if path:
         c = json.load(open(path, encoding="utf-8"))
@@ -57,8 +61,9 @@ def load_camera(folder, meta, W, H):
     return cam
 
 
-# ---------------------------------------------------------------- 1단계: 특징점
+# ---------------------------------------------------------------- step 1: feature points
 def match_pairs(folder, items, cam):
+    """Matches SIFT features between overlapping photos, dropping matches far from where the motor angles predict them."""
     sift = cv2.SIFT_create(nfeatures=5000)
     feats = []
     for it in items:
@@ -81,7 +86,7 @@ def match_pairs(folder, items, cam):
             continue
         A = pi[[g.queryIdx for g in good]]
         B = pj[[g.trainIdx for g in good]]
-        # 모터 각도 기준 예측 위치에서 너무 먼 매칭 제거
+        # drop matches too far from the position predicted by the motor angles
         vb = (pixels_to_cam_rays(cam, A) @ M.T @ R[i].T) @ R[j] @ M
         front = vb[:, 2] > 0.1
         pred = cam_rays_to_pixels(cam, np.where(front[:, None], vb, [[0, 0, 1]]))
@@ -101,6 +106,7 @@ INTR = ["f", "aspect", "cx", "cy", "roll", "myaw", "k1", "k2"]
 
 
 def bundle_adjust(items, pairs, cam, ref, W):
+    """Fits the camera values and every photo's yaw/pitch/roll correction together (bundle adjustment), twice."""
     N = len(items)
     I = np.concatenate([np.full(len(A), i) for i, j, A, B in pairs])
     J = np.concatenate([np.full(len(A), j) for i, j, A, B in pairs])
@@ -109,6 +115,7 @@ def bundle_adjust(items, pairs, cam, ref, W):
     pix = (W / 2) / math.tan(math.radians(40))
 
     def rotations(p, corr):
+        """Returns each photo's world rotation with its correction applied."""
         out = []
         for k, it in enumerate(items):
             dy, dp, dr = corr[k]
@@ -117,22 +124,25 @@ def bundle_adjust(items, pairs, cam, ref, W):
         return np.array(out)
 
     def unpack(x):
+        """Splits the parameter vector into camera values and per-photo corrections (the reference photo stays fixed)."""
         p = dict(zip(INTR, x[:8]))
         corr = x[8:].reshape(N, 3).copy()
         corr[ref] = 0
         return p, corr
 
     def resid(x):
+        """Angular errors of all matched points in pixels, plus a penalty on large corrections."""
         p, corr = unpack(x)
         Rs = rotations(p, corr)
         wa = np.einsum("kij,kj->ki", Rs[I], pixels_to_cam_rays(p, PA))
         wb = np.einsum("kij,kj->ki", Rs[J], pixels_to_cam_rays(p, PB))
         r = np.arcsin(np.clip(np.linalg.norm(np.cross(wa, wb), axis=1), 0, 1)) * pix
-        reg = np.degrees(corr.ravel()) * 0.3      # 근거 없는 큰 보정 억제
+        reg = np.degrees(corr.ravel()) * 0.3      # discourages large corrections without evidence
         return np.concatenate([r, reg])
 
     def sparsity():
-        # 각 대응점 오차는 카메라 값 8개와 두 사진의 보정값에만 의존 -> 미분 계산을 크게 줄임
+        """Marks which parameters each residual depends on, so the Jacobian stays sparse."""
+        # each point's error depends only on the 8 camera values and the two photos' corrections -> far fewer derivatives
         n = len(PA)
         S = lil_matrix((n + N * 3, 8 + N * 3), dtype=int)
         S[:n, :8] = 1
@@ -149,7 +159,7 @@ def bundle_adjust(items, pairs, cam, ref, W):
                         jac_sparsity=sparsity(), max_nfev=200)
     p, corr = unpack(sol.x)
     r = resid(sol.x)[:len(PA)]
-    # 오차가 큰 매칭을 빼고 한 번 더
+    # drop the matches with large errors and fit once more
     keep = r < max(10.0, 4 * np.median(r))
     I, J, PA, PB = I[keep], J[keep], PA[keep], PB[keep]
     sol = least_squares(resid, sol.x, loss="soft_l1", f_scale=2.0, x_scale="jac",
@@ -160,8 +170,9 @@ def bundle_adjust(items, pairs, cam, ref, W):
     return p, np.degrees(corr), counts, float(np.median(r))
 
 
-# ---------------------------------------------------------------- 2단계: 윤곽 일치 탐색
+# ---------------------------------------------------------------- step 2: outline matching search
 def highpass(img):
+    """Grayscale, half-size, high-pass filtered and normalised version of a photo, for outline matching."""
     g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
     g = cv2.resize(g, (g.shape[1] // 2, g.shape[0] // 2), interpolation=cv2.INTER_AREA)
     h = g - cv2.GaussianBlur(g, (0, 0), 3)
@@ -169,6 +180,7 @@ def highpass(img):
 
 
 def half_cam(p):
+    """Camera parameters for half-size images."""
     c = dict(p)
     c["f"] /= 2
     c["cx"] = (c["cx"] + 0.5) / 2 - 0.5
@@ -177,8 +189,9 @@ def half_cam(p):
 
 
 def photometric_search(target_hp, it, corr0, others, cam_half, grids):
-    """others: [(hp, yaw, pitch, extra_roll)] 로 만든 기준 윤곽과 가장 잘 겹치는 (dyaw, dpitch) 탐색.
-    grids: (저해상도, 고해상도) - 저해상도로 넓게 찾고 고해상도로 좁혀 찾는다."""
+    """Searches for the (dyaw, dpitch) at which the photo best matches the reference outlines built from
+    others: [(hp, yaw, pitch, extra_roll)].
+    grids: (low resolution, high resolution) - a wide search at low resolution, then a narrow one at high resolution."""
     refs = []
     for grid in grids:
         acc = np.zeros((grid.H, grid.W), np.float32)
@@ -193,6 +206,7 @@ def photometric_search(target_hp, it, corr0, others, cam_half, grids):
         refs.append((grid, np.where(cnt > 0, acc / np.maximum(cnt, 1), 0), cnt))
 
     def err(level, dy, dp):
+        """Mean squared difference between the warped photo and the reference outlines at one resolution level."""
         grid, ref, cnt = refs[level]
         res = grid.warp(target_hp, it["yaw_deg"] + dy, it["pitch_deg"] + dp, feather=0, cam=cam_half,
                         extra_roll_deg=corr0[2])
@@ -204,7 +218,7 @@ def photometric_search(target_hp, it, corr0, others, cam_half, grids):
             return np.inf
         return float(np.mean((w[o] - ref[r0:r1][o]) ** 2))
 
-    # 저해상도: pitch 1° / yaw 2° 간격, 처짐은 주로 아래쪽이라 아래로 넓게
+    # low resolution: pitch every 1°, yaw every 2°; wider downwards since sag mostly goes down
     best = (err(0, corr0[0], corr0[1]), corr0[0], corr0[1])
     coarse = []
     for dp in np.arange(corr0[1] - 12, corr0[1] + 6.01, 1.0):
@@ -214,8 +228,8 @@ def photometric_search(target_hp, it, corr0, others, cam_half, grids):
                 coarse.append(e)
             if e < best[0]:
                 best = (e, dy, dp)
-    contrast = best[0] / np.median(coarse) if coarse else np.inf   # 1보다 충분히 작아야 뚜렷한 최솟값
-    # 고해상도: 주변을 촘촘히
+    contrast = best[0] / np.median(coarse) if coarse else np.inf   # a clear minimum needs this well below 1
+    # high resolution: dense search around it
     fine = (err(1, best[1], best[2]), best[1], best[2])
     for dp in np.arange(best[2] - 1.0, best[2] + 1.01, 0.25):
         for dy in np.arange(best[1] - 2.0, best[1] + 2.01, 0.5):
@@ -225,8 +239,9 @@ def photometric_search(target_hp, it, corr0, others, cam_half, grids):
     return fine, contrast
 
 
-# ---------------------------------------------------------------- 메인
+# ---------------------------------------------------------------- main
 def main():
+    """Matches features, runs the bundle adjustment, searches the photos with too few features, and writes meta_refined.json."""
     ap = argparse.ArgumentParser()
     ap.add_argument("folder")
     args = ap.parse_args()
@@ -243,7 +258,7 @@ def main():
     pairs = match_pairs(folder, items, cam)
     print(f"  사진 쌍 {len(pairs)}개, 대응점 {sum(len(p[2]) for p in pairs)}개")
 
-    # 기준 사진: 수평(0°)에 가장 가까운 행에서 대응점이 가장 많은 사진
+    # reference photo: the one with the most matched points in the row closest to level (0°)
     cnt0 = np.zeros(N, int)
     for i, j, A, B in pairs:
         cnt0[i] += len(A)
@@ -258,7 +273,7 @@ def main():
 
     method = ["특징점" if counts[k] >= MIN_POINTS or k == ref else "" for k in range(N)]
 
-    # 2·3단계: 특징점이 부족한 사진
+    # steps 2 and 3: photos with too few features
     weak = [k for k in range(N) if not method[k]]
     if weak:
         print(f"특징점이 부족한 사진 {len(weak)}장 -> 윤곽 일치 탐색")
@@ -280,7 +295,7 @@ def main():
                 corr[k] = start
                 method[k] = "행 중앙값" if same else "보정 없음"
 
-    # 결과 출력
+    # print the results
     print("\n사진         yaw보정  pitch보정  roll보정  대응점  방법")
     warn = []
     for k, it in enumerate(items):
@@ -298,7 +313,7 @@ def main():
         print(f"  {np.mean([items[k]['pitch_deg'] for k in range(N) if items[k]['row'] == r]):+5.1f}° 행: "
               f"{np.median(v):+5.2f}°  (범위 {min(v):+.1f}° ~ {max(v):+.1f}°)")
 
-    # 저장
+    # save
     out = dict(meta)
     out["camera"] = {
         "hfov_deg": 2 * math.degrees(math.atan((W / 2) / p["f"])),

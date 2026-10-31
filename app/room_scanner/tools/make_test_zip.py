@@ -15,6 +15,7 @@ import yaml
 
 
 def fake_panorama(path):
+    """Writes a synthetic 2:1 test panorama with coloured gradients and a grid."""
     import numpy as np
     import cv2
     h, w = 1024, 2048
@@ -32,6 +33,7 @@ def fake_panorama(path):
 
 
 def main():
+    """Packs a logger.py session (and optionally a fake panorama) into a scan bundle."""
     ap = argparse.ArgumentParser()
     ap.add_argument("session_dir")
     ap.add_argument("out")

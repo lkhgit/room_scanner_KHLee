@@ -8,6 +8,7 @@ CFG = yaml.safe_load((ROOT / "config.yaml").read_text(encoding="utf-8")) or {}
 
 
 def _path(p: str) -> Path:
+    """Resolves a config path relative to the app folder unless it is absolute."""
     q = Path(p)
     return (q if q.is_absolute() else ROOT / q).resolve()
 

@@ -1,16 +1,16 @@
 """
-침수 이력이 있는 100m 격자를 '잠긴 해들의 강우 PC 평균 서명'으로 클러스터링하는 스크립트.
+Clusters the 100 m grid cells with flood history by their 'mean rainfall PC signature of the years they flooded'.
 
-1. 격자별 침수 이력: 격자 x 연도(2010~2025) 침수 여부 표 (2015, 2021은 자료 없음 -> NaN)
-2. 평균 서명: 격자마다 잠긴 해들의 PC1~PC4 평균
-3. 표준화: 서명 4개 열을 격자 전체에 대해 열별 표준화
-4. HDBSCAN: 4차원 서명으로 클러스터링, 노이즈(-1) 표시
-5. 지리적 처리: 노이즈 격자를 가장 가까운 클러스터 격자(중심점 거리)의 라벨로 부착
-6. 점검: 클러스터 크기, 침수 연도 수, 지도
+1. Flood history per cell: cell × year (2010-2025) flooded table (no data for 2015, 2021 -> NaN)
+2. Mean signature: mean PC1-PC4 of the years each cell flooded
+3. Standardisation: each of the 4 signature columns standardised over all cells
+4. HDBSCAN: clustering on the 4-dimensional signature, noise marked as -1
+5. Geographic step: noise cells take the label of the nearest clustered cell (distance between centres)
+6. Checks: cluster sizes, number of flood years, map
 
-한 번도 침수되지 않은 격자는 처음부터 제외한다.
+Cells that never flooded are left out from the start.
 
-실행:
+Run:
     & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "grid clustering.py"
 """
 import json
@@ -34,13 +34,13 @@ SOURCE_CRS = "EPSG:5179"
 
 CELL_SIZE_M = 100
 YEARS = list(range(2010, 2026))
-NO_DATA_YEARS = [2015, 2021]  # 침수흔적도 자료 없음
+NO_DATA_YEARS = [2015, 2021]  # no flood trace map data
 PC_COLS = ["PC1", "PC2", "PC3", "PC4"]
 
 MIN_CLUSTER_SIZE = 100
 MIN_SAMPLES = 20
 
-# '강우량 차원 축소 방법.txt'의 변환 파라미터 (PC 값 검증용)
+# transformation parameters from '강우량 차원 축소 방법.txt' (the PCA settings file, to check the PC values)
 RAIN_FEATURES = ["R1_max1h", "R1_max24h", "R2_max1h", "R2_max24h", "R3_max1h",
                  "R3_max24h", "R4_max1h", "R4_max24h", "R5_max1h", "R5_max24h"]
 RAIN_MEAN = np.array([42.5220588235, 163.6176470588, 42.4068627451, 162.4191176471, 44.4740896359,
@@ -61,7 +61,7 @@ PALETTE = [
 
 
 def load_year_pcs():
-    """연도별 PC1~PC4를 읽고, 변환 파라미터로 다시 계산한 값과 일치하는지 확인."""
+    """Reads PC1-PC4 per year and checks them against the values recomputed from the transformation parameters."""
     pcs = pd.read_csv(PC_PATH, encoding="utf-8-sig").set_index("year")[PC_COLS]
     raw = pd.read_csv(RAIN_FEATURE_PATH, encoding="utf-8-sig").set_index("year")
     manual = ((raw[RAIN_FEATURES].values - RAIN_MEAN) / RAIN_STD) @ RAIN_COMPONENTS.T
@@ -71,11 +71,11 @@ def load_year_pcs():
 
 
 def build_flood_history():
-    """침수 폴리곤과 교차하는 격자만 골라 격자 x 연도 침수 여부 표를 만든다."""
+    """Keeps only the cells that intersect a flood polygon and builds the cell × year flooded table."""
     floods = gpd.read_file(FLOOD_PATH)[["YEAR", "geometry"]]
     floods["YEAR"] = floods["YEAR"].astype(int)
 
-    # 격자를 셀 크기에 맞춰 정렬 (build_grid.py와 같은 방식)
+    # align the grid to the cell size (same way as build_grid.py)
     minx, miny, maxx, maxy = floods.total_bounds
     minx = np.floor(minx / CELL_SIZE_M) * CELL_SIZE_M
     miny = np.floor(miny / CELL_SIZE_M) * CELL_SIZE_M
@@ -106,7 +106,7 @@ def build_flood_history():
 
 
 def mean_signature(history, year_pcs):
-    """잠긴 해들의 PC1~PC4 평균. 자료 없는 해(NaN)는 잠기지 않은 해처럼 빠진다."""
+    """Mean PC1-PC4 of the years a cell flooded. Years without data (NaN) drop out like years without flooding."""
     flags = history.fillna(0).values
     n_years = flags.sum(axis=1)
     sig = flags @ year_pcs.values / n_years[:, None]
@@ -114,7 +114,7 @@ def mean_signature(history, year_pcs):
 
 
 def attach_noise(xy, labels):
-    """노이즈 격자를 가장 가까운 클러스터 격자의 라벨로 부착. 붙은 거리(m)도 함께 반환."""
+    """Gives noise cells the label of the nearest clustered cell; also returns that distance (m)."""
     labels = labels.copy()
     assign = np.where(labels >= 0, "hdbscan", "nearest")
     dist = np.zeros(len(labels))
@@ -129,9 +129,9 @@ def attach_noise(xy, labels):
 
 
 def cluster_cells(xy, history, year_pcs):
-    """서명 -> 표준화 -> HDBSCAN -> 노이즈 부착. history에 있는 연도 열만 쓴다 (교차검증 재클러스터링용).
+    """Signature -> standardisation -> HDBSCAN -> attach noise. Uses only the year columns in history (for re-clustering in cross-validation).
 
-    xy: history와 같은 순서의 격자 중심점 좌표. 모든 격자는 history 연도 중 한 번 이상 잠겨 있어야 한다.
+    xy: cell centre coordinates in the same order as history. Every cell must have flooded at least once in the history years.
     """
     sig, n_years = mean_signature(history, year_pcs.loc[history.columns])
     X = StandardScaler().fit_transform(sig.values)
@@ -141,10 +141,12 @@ def cluster_cells(xy, history, year_pcs):
 
 
 def year_combo(row):
+    """Joins the years a cell flooded into a string like '2010+2022'."""
     return "+".join(str(y) for y in YEARS if row[y] == 1)
 
 
 def summarize(df, label_col):
+    """Summarises each cluster: size, flood year counts, most common year combinations and mean signature."""
     rows = []
     for lab, g in df.groupby(label_col):
         combos = g["combo"].value_counts().head(3)
@@ -161,12 +163,14 @@ def summarize(df, label_col):
 
 
 def save_map(cells_4326, label_col, assign_col, path):
+    """Saves an interactive folium map of the clusters."""
     center = cells_4326.geometry.union_all().centroid
     m = folium.Map(location=[center.y, center.x], zoom_start=11, tiles="cartodbpositron")
     data = cells_4326[["geometry", "combo", "n_years", "hdbscan_label", "attach_dist_m", label_col, assign_col]].copy()
     data = data.rename(columns={label_col: "cluster", assign_col: "assign"})
 
     def style(feature):
+        """Colours a cell by its cluster and outlines cells attached from noise."""
         p = feature["properties"]
         return {
             "fillColor": PALETTE[p["cluster"] % len(PALETTE)],
@@ -187,6 +191,7 @@ def save_map(cells_4326, label_col, assign_col, path):
 
 
 def main():
+    """Builds the flood history, clusters the cells, attaches noise and saves the tables and map."""
     os.makedirs(OUT_DIR, exist_ok=True)
 
     print("[1/6] 연도별 PC 로드")

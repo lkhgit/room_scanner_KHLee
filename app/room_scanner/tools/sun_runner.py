@@ -103,6 +103,7 @@ GAMMA_FIXES = [
 
 
 def restyle(text: str) -> str:
+    """Applies the brighter sun-hours colours and the gamma fix to the viewer template."""
     text = text.replace(HOUR_STOPS_OLD, HOUR_STOPS_NEW)
     for old, new in GAMMA_FIXES:
         text = text.replace(old, new)
@@ -110,6 +111,7 @@ def restyle(text: str) -> str:
 
 
 def translate(text: str) -> str:
+    """Replaces the known Korean strings with English."""
     for ko, en in PAIRS:
         text = text.replace(ko, en)
     for rx, en in REGEX:
@@ -123,6 +125,7 @@ def visible_korean(text: str):
 
 
 def main():
+    """Loads sun_calculator.py, translates its viewer template, runs it, then translates the files it wrote."""
     spec = importlib.util.spec_from_file_location("sun_calculator", SUN)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

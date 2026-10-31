@@ -1,9 +1,9 @@
-// GY-BNO055 자북 방위 + 지자기 보정값 EEPROM 저장/복원 (Arduino UNO)
-// 필요 라이브러리: Adafruit BNO055, Adafruit Unified Sensor
+// GY-BNO055 magnetic heading + saving/restoring the magnetometer calibration in EEPROM (Arduino UNO)
+// Libraries needed: Adafruit BNO055, Adafruit Unified Sensor
 //
-// 처음 실행: 8자로 돌려 M=3이 되면 자동 저장
-// 다음부터: 부팅 시 저장값 자동 복원
-// 시리얼 명령(115200): 's' 지금 값 저장 / 'c' 저장값 삭제
+// First run: move it in a figure eight; it saves automatically once M=3
+// After that: the saved values are restored automatically at boot
+// Serial commands (115200): 's' save the current values / 'c' delete the saved values
 
 #include <Wire.h>
 #include <EEPROM.h>
@@ -13,13 +13,13 @@
 const uint8_t BNO_ADDR = 0x29;
 Adafruit_BNO055 bno(55, BNO_ADDR, &Wire);
 
-const uint32_t MAGIC = 0xB0055C01;  // 저장된 데이터가 유효한지 표시
+const uint32_t MAGIC = 0xB0055C01;  // marks the saved data as valid
 const int ADDR_MAGIC = 0;
 const int ADDR_DATA = 4;
-const uint8_t OFFSET_LEN = 22;       // 가속도·지자기·자이로 오프셋 + 반경
+const uint8_t OFFSET_LEN = 22;       // accelerometer, magnetometer and gyro offsets + radii
 bool saved = false;
 
-// 오프셋 레지스터(0x55~0x6A)를 직접 읽음 (CONFIG 모드에서만 읽기 가능)
+// Reads the offset registers (0x55-0x6A) directly (only readable in CONFIG mode).
 bool readOffsets(uint8_t *buf) {
   bno.setMode(OPERATION_MODE_CONFIG);
   delay(25);
@@ -36,8 +36,9 @@ bool readOffsets(uint8_t *buf) {
   return ok;
 }
 
+// Prints the magnetometer offsets from a calibration buffer.
 void printOffsets(const uint8_t *buf) {
-  // 지자기 오프셋 X, Y, Z (리틀엔디안 int16)
+  // magnetometer offsets X, Y, Z (little-endian int16)
   int16_t mx = buf[6] | (buf[7] << 8);
   int16_t my = buf[8] | (buf[9] << 8);
   int16_t mz = buf[10] | (buf[11] << 8);
@@ -47,6 +48,7 @@ void printOffsets(const uint8_t *buf) {
   Serial.println(mz);
 }
 
+// Reads the current calibration and saves it to EEPROM.
 void saveOffsets() {
   uint8_t buf[OFFSET_LEN];
   if (!readOffsets(buf)) {
@@ -60,6 +62,7 @@ void saveOffsets() {
   saved = true;
 }
 
+// Starts the sensor in compass mode and restores the saved calibration if there is one.
 void setup() {
   Serial.begin(115200);
   Serial.println("start");
@@ -84,6 +87,7 @@ void setup() {
   }
 }
 
+// Handles the s/c commands, saves once M reaches 3, and prints the calibration state and heading.
 void loop() {
   if (Serial.available()) {
     char c = Serial.read();
@@ -109,7 +113,7 @@ void loop() {
   Serial.print("M=");
   Serial.print(mag);
   Serial.print("  heading=");
-  Serial.println(e.orientation.x, 1);  // 0 = 자북, 시계방향 증가
+  Serial.println(e.orientation.x, 1);  // 0 = magnetic north, increasing clockwise
 
   delay(200);
 }

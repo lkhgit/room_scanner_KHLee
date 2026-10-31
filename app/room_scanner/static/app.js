@@ -4,8 +4,11 @@ import { mountScan } from "/static/scan.js";
 
 const app = document.getElementById("app");
 let cleanup = null;
+// Returns the first element that matches a CSS selector.
 const $ = (s, r = document) => r.querySelector(s);
+// Escapes text for safe use inside HTML.
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// Fetches a JSON API and throws an Error with the server's message if the request fails.
 const api = async (url, opts) => {
   const r = await fetch(url, opts);
   const body = await r.json().catch(() => null);
@@ -14,6 +17,7 @@ const api = async (url, opts) => {
   return body;
 };
 
+// Shows the screen for the current URL hash (home, scan wizard or a room's results).
 function route() {
   if (cleanup) { cleanup(); cleanup = null; }
   const m = location.hash.match(/^#\/room\/([0-9a-f]{12})/);
@@ -23,6 +27,7 @@ addEventListener("hashchange", route);
 route();
 
 // ------------------------------------------------------------------ Home
+// Shows the home screen: scan and upload options and the list of previous rooms.
 async function home() {
   app.innerHTML = `<div class="page">
     <h1>Check a room before you rent it</h1>
@@ -39,6 +44,7 @@ async function home() {
     <div id="msg"></div>
     <div class="card" id="prev" hidden><h2>Previous rooms</h2><ul class="rooms" id="rooms"></ul></div></div>`;
   const msg = $("#msg"), drop = $("#drop"), file = $("#file");
+  // Uploads a scan bundle and opens the new room, or shows what is wrong with the file.
   async function send(f) {
     msg.innerHTML = `<div class="notice"><span class="spin"></span>Checking ${esc(f.name)}…</div>`;
     const fd = new FormData(); fd.append("file", f);
@@ -65,6 +71,7 @@ async function home() {
   }
 }
 
+// Shows the scan wizard.
 function scan() {
   cleanup = mountScan(app);
 }
@@ -73,6 +80,7 @@ function scan() {
 const STEP_LABEL = { stitch: "Stitch photos into a panorama", model: "Build the 3D room model", sun: "Calculate sunlight", mold: "Run the mold simulation" };
 const TAB_STEPS = { sun: ["stitch", "model", "sun"], mold: ["mold"], flood: [] };
 
+// Shows a room's results screen and keeps it updated while steps run.
 async function results(id) {
   let room;
   try { room = await api(`/api/rooms/${id}`); } catch { app.innerHTML = `<div class="page"><div class="notice bad">This room was not found.</div><a href="#/">Back to Home</a></div>`; return; }
@@ -82,6 +90,7 @@ async function results(id) {
     <div class="tabs" id="tabs"></div>
     <div id="panes"><div class="pane" id="p-sun"></div><div class="pane" id="p-mold"></div><div class="pane" id="p-flood"></div></div>`;
 
+  // Draws the bar with the room name, location and north heading, and wires the Apply button.
   function renderBar() {
     const p = room.params, c = p.heading_confidence;
     $("#bar").innerHTML = `<span class="name">${esc(room.name)}</span>
@@ -101,15 +110,20 @@ async function results(id) {
       } catch (e) { $("#barmsg").textContent = e.message; }
     };
   }
+  // Draws the Sunlight / Mold / Flood tabs with a status dot for each.
   function renderTabs() {
+    // Returns the states of the steps a tab depends on.
     const st = (t) => TAB_STEPS[t].map((s) => room.steps[s].state);
+    // Picks the status dot class for a tab from its steps' states.
     const dot = (t) => { const s = st(t); return s.includes("failed") ? "failed" : s.includes("running") || s.includes("pending") ? "running" : s.length && s.every((x) => x === "done") ? "done" : ""; };
     $("#tabs").innerHTML = [["sun", "Sunlight"], ["mold", "Mold"], ["flood", "Flood risk"]].map(([t, l]) =>
       `<button class="tab ${ui.tab === t ? "on" : ""}" data-t="${t}">${l}<span class="dot ${dot(t)}"></span></button>`).join("");
     document.querySelectorAll(".tab").forEach((b) => b.onclick = () => { ui.tab = b.dataset.t; sessionStorage.setItem("tab", ui.tab); renderTabs(); renderPanes(); });
   }
 
+  // Returns the HTML for a list of processing steps, with Retry buttons for failed ones.
   function progress(steps, extra = "") {
+    // Returns the icon for a step state.
     const icon = (s) => ({ done: "✓", running: '<span class="spin"></span>', failed: "✕", skipped: "–", waiting: "…" }[s] || "·");
     const failed = steps.filter((s) => room.steps[s].state === "failed");
     return `<div class="status"><h2>${steps.length ? "Working on this room" : ""}</h2><div class="steps">${steps.map((s) => {
@@ -118,10 +132,12 @@ async function results(id) {
         <div style="margin-top:6px"><button class="btn" data-retry="${s}">Retry</button></div>
         ${room.steps[s].detail ? `<details><summary class="dim">Technical details</summary><pre>${esc(room.steps[s].detail)}</pre></details>` : ""}</div>`).join("")}${extra}</div>`;
   }
+  // Wires the Retry buttons inside a pane.
   function bindRetry(pane) {
     pane.querySelectorAll("[data-retry]").forEach((b) => b.onclick = async () => { await api(`/api/rooms/${id}/retry/${b.dataset.retry}`, { method: "POST" }); poll(); });
   }
 
+  // Shows the mold viewer once the simulation is done, otherwise its progress.
   async function renderMold() {
     const pane = $("#p-mold"), s = room.steps.mold;
     const key = `${s.state}|${room.params.lat}|${room.params.lon}|${room.steps.model.state}`;
@@ -139,6 +155,7 @@ async function results(id) {
     }
   }
 
+  // Shows the sunlight viewer with date presets, or the reason it is not available yet.
   function renderSun() {
     const pane = $("#p-sun");
     if (room.steps.model.state === "skipped") { pane.innerHTML = `<div class="status"><div class="notice warn">This scan has no photos, so sunlight cannot be calculated.</div></div>`; return; }
@@ -155,6 +172,7 @@ async function results(id) {
         ${presets.map(([l, d]) => `<button class="btn" data-d="${d}">${l}</button>`).join("")}
         <span class="conf dim" id="sunmsg"></span></div>
       <div style="flex:1;min-height:0;position:relative"><iframe id="sunframe" title="Sunlight"></iframe></div></div>`;
+    // Requests the sunlight result for a date and loads it into the viewer when ready.
     const load = async (d) => {
       ui.sunDate = d; $("#sd").value = d; $("#sunmsg").innerHTML = '<span class="spin"></span>Recalculating…';
       $("#sunframe").style.opacity = ".35";
@@ -174,6 +192,7 @@ async function results(id) {
     load(ui.sunDate);
   }
 
+  // Shows the flood map centred on the room's location.
   function renderFlood() {
     const pane = $("#p-flood"), p = room.params;
     const key = `${p.lat}|${p.lon}`;
@@ -183,12 +202,14 @@ async function results(id) {
     pane.innerHTML = `<iframe title="Flood risk" src="/flood/${q}"></iframe>`;
   }
 
+  // Shows the selected tab's pane and renders it.
   function renderPanes() {
     ["sun", "mold", "flood"].forEach((t) => $(`#p-${t}`).classList.toggle("on", ui.tab === t));
     if (ui.tab === "mold") renderMold(); else if (ui.tab === "sun") renderSun(); else renderFlood();
   }
 
   let timer = null, stopped = false;
+  // Reloads the room state and redraws, polling faster while steps are running.
   async function poll() {
     clearTimeout(timer);
     try { room = await api(`/api/rooms/${id}`); } catch { /* keep polling */ }

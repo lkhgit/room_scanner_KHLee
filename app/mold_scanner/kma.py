@@ -1,13 +1,13 @@
 """
-기상청·카카오 API 공용 모듈 (logger.py와 mold_simulator.py가 함께 쓴다)
+Shared module for the KMA (Korea Meteorological Administration) and Kakao APIs, used by logger.py and mold_simulator.py
 
-    인증키            이 파일에 직접 적는다
-    p_sat             포화수증기압 (원 명세 §4.1)
-    latlon_to_grid    위경도 -> 기상청 5 km 격자 (nx, ny)   (수정 명세 §2.2)
-    fetch_ncst        초단기실황 = 측정 시점 외기           (수정 명세 §2.1)
-    outdoor.csv       세션 폴더의 측정 시점 외기 기록       (수정 명세 §2.4)
-    geocode           카카오 로컬 API로 장소 이름 -> 좌표
-    관측소 좌표       asos_stations.yaml (손으로 적은 표), asos_stations.csv (기상자료개방포털 지점정보)
+    API keys          written directly in this file
+    p_sat             saturation vapour pressure (original spec §4.1)
+    latlon_to_grid    latitude/longitude -> KMA 5 km grid (nx, ny)   (revised spec §2.2)
+    fetch_ncst        ultra-short-term observation = outdoor air at the time of the scan   (revised spec §2.1)
+    outdoor.csv       outdoor air at scan time, kept in the session folder   (revised spec §2.4)
+    geocode           place name -> coordinates with the Kakao Local API
+    station coords    asos_stations.yaml (hand-written table), asos_stations.csv (station list from the KMA open data portal)
 """
 
 import csv
@@ -32,37 +32,39 @@ KAKAO_REST_KEY = ""    # <-- ENTER your Kakao REST API key here
 KST = ZoneInfo("Asia/Seoul")
 HERE = Path(__file__).parent
 STATION_YAML = HERE / "asos_stations.yaml"
-STATION_CSV_NAMES = ("asos_stations.csv", "관측지점정보_종관기상관측.csv")   # 포털에서 받은 이름 그대로도 읽음
+STATION_CSV_NAMES = ("asos_stations.csv", "관측지점정보_종관기상관측.csv")   # also reads the file under the name the portal gives it
 STATION_CSV = next((HERE / n for n in STATION_CSV_NAMES if (HERE / n).exists()), HERE / STATION_CSV_NAMES[0])
 
 
 def service_key() -> str:
+    """Returns the KMA service key, raising an error if it has not been entered."""
     key = KMA_SERVICE_KEY.strip()
     if not key:
         raise RuntimeError("!!! KMA_SERVICE_KEY is EMPTY - enter your data.go.kr service key in "
                            "app/mold_scanner/kma.py !!!")
-    return unquote(key) if "%" in key else key   # Encoding 키를 넣어도 이중 인코딩되지 않게
+    return unquote(key) if "%" in key else key   # so a URL-encoded key is not encoded twice
 
 
 def p_sat(T):
-    """포화수증기압 [hPa]. Magnus식(Alduchov-Eskridge, 물 기준), 0 °C 이하도 같은 식."""
+    """Saturation vapour pressure [hPa]. Magnus formula (Alduchov-Eskridge, over water), also used below 0 °C."""
     T = np.asarray(T, dtype=float)
     return 6.1094 * np.exp(17.625 * T / (T + 243.04))
 
 
 def iso_hour(h: datetime) -> str:
+    """Formats a full hour as an ISO string in KST."""
     return h.strftime("%Y-%m-%dT%H:00:00+09:00")
 
 
 def parse_kst(s: str) -> datetime:
-    """ISO 8601 문자열 -> KST 기준 naive datetime."""
+    """ISO 8601 string -> naive datetime in KST."""
     dt = datetime.fromisoformat(s)
     return dt.astimezone(KST).replace(tzinfo=None) if dt.tzinfo else dt
 
 
-# ---------------------------------------------------------------- 격자 변환 (§2.2)
+# ---------------------------------------------------------------- grid conversion (§2.2)
 def latlon_to_grid(lat: float, lon: float) -> tuple[int, int]:
-    """기상청 람베르트 정각원추 투영 (동네예보 5 km 격자)."""
+    """KMA Lambert conformal conic projection (the 5 km grid of the local forecast)."""
     RE, GRID, SLAT1, SLAT2, OLON, OLAT, XO, YO = 6371.00877, 5.0, 30.0, 60.0, 126.0, 38.0, 43, 136
     D = math.pi / 180
     re = RE / GRID
@@ -82,7 +84,7 @@ def latlon_to_grid(lat: float, lon: float) -> tuple[int, int]:
 
 
 def station_coords(stn: int):
-    """관측소 (위도, 경도, 이름). asos_stations.yaml을 먼저, 없으면 asos_stations.csv를 본다."""
+    """Station (latitude, longitude, name). Looks in asos_stations.yaml first, then asos_stations.csv."""
     if STATION_YAML.exists():
         with STATION_YAML.open(encoding="utf-8") as f:
             table = yaml.safe_load(f) or {}
@@ -99,7 +101,7 @@ def station_coords(stn: int):
 
 
 def resolve_grid(site: dict, station: int | None):
-    """(nx, ny, 근거). site.lat/lon -> 관측소 좌표 순서. 둘 다 없으면 None."""
+    """(nx, ny, source). Uses site.lat/lon, then the station coordinates. None if neither exists."""
     if site.get("lat") is not None and site.get("lon") is not None:
         return (*latlon_to_grid(float(site["lat"]), float(site["lon"])), "site.lat/lon")
     if station is not None:
@@ -109,12 +111,12 @@ def resolve_grid(site: dict, station: int | None):
     return None
 
 
-# ---------------------------------------------------------------- 초단기실황 (§2.1)
+# ---------------------------------------------------------------- ultra-short-term observations (§2.1)
 NCST_URL = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"
 
 
 def _ncst_request(base: datetime, nx: int, ny: int) -> dict:
-    """초단기실황 한 번 호출. 응답 JSON. (테스트에서 가짜 응답으로 바꿔 끼운다)"""
+    """Calls the ultra-short-term observation API once and returns the JSON reply. (Tests swap in a fake reply.)"""
     import requests
     r = requests.get(NCST_URL, timeout=20, params={
         "serviceKey": service_key(), "pageNo": 1, "numOfRows": 10, "dataType": "JSON",
@@ -124,7 +126,7 @@ def _ncst_request(base: datetime, nx: int, ny: int) -> dict:
 
 
 def _ncst_once(base: datetime, nx: int, ny: int):
-    """(T1H, REH) 또는 실패 시 None. 키가 없으면 RuntimeError를 그대로 올린다."""
+    """(T1H, REH), or None on failure. A missing key raises RuntimeError as it is."""
     import requests
     try:
         resp = _ncst_request(base, nx, ny)["response"]
@@ -138,7 +140,7 @@ def _ncst_once(base: datetime, nx: int, ny: int):
 
 
 def fetch_ncst(hour: datetime, nx: int, ny: int):
-    """정시 hour의 초단기실황. 실패하면 한 시간 전을 요청한다. outdoor.csv 행 또는 None."""
+    """Ultra-short-term observation for the full hour `hour`, or the hour before if that fails. An outdoor.csv row or None."""
     for base in (hour, hour - timedelta(hours=1)):
         got = _ncst_once(base, nx, ny)
         if got:
@@ -154,6 +156,7 @@ OUTDOOR_COLUMNS = ["hour", "source", "t_out_c", "rh_out_pct", "p_out_hpa", "nx",
 
 
 def read_outdoor(path: Path) -> list[dict]:
+    """Reads outdoor.csv into a list of rows (empty if the file does not exist)."""
     if not path.exists():
         return []
     out = []
@@ -170,7 +173,7 @@ def read_outdoor(path: Path) -> list[dict]:
 
 
 def append_outdoor(path: Path, rows: list[dict]) -> int:
-    """(hour, source)가 아직 없는 행만 추가한다. 추가한 행 수."""
+    """Adds only rows whose (hour, source) is not there yet. Returns the number of rows added."""
     existing = read_outdoor(path)
     keys = {(r["hour"], r["source"]) for r in existing}
     new = []
@@ -195,7 +198,7 @@ def append_outdoor(path: Path, rows: list[dict]) -> int:
 
 
 def collect_ncst(path: Path, hours: list[datetime], nx: int, ny: int) -> tuple[int, list[datetime]]:
-    """hours 중 ncst 행이 없는 정시를 요청해 outdoor.csv에 추가한다. (추가 수, 못 구한 정시)"""
+    """Fetches the hours that have no ncst row yet and adds them to outdoor.csv. Returns (rows added, hours not found)."""
     have = {r["hour"] for r in read_outdoor(path) if r["source"] == "ncst"}
     rows, failed = [], []
     for h in sorted(hours):
@@ -210,19 +213,20 @@ def collect_ncst(path: Path, hours: list[datetime], nx: int, ny: int) -> tuple[i
     return append_outdoor(path, rows), failed
 
 
-# ---------------------------------------------------------------- 카카오 지오코딩, 관측소 목록
+# ---------------------------------------------------------------- Kakao geocoding, station list
 KAKAO_ADDRESS_URL = "https://dapi.kakao.com/v2/local/search/address.json"
 KAKAO_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
+    """Great-circle distance in km between two latitude/longitude points."""
     lat1, lon1, lat2, lon2 = (np.radians(np.asarray(v, dtype=float)) for v in (lat1, lon1, lat2, lon2))
     a = np.sin((lat2 - lat1) / 2) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin((lon2 - lon1) / 2) ** 2
     return 2 * 6371.0 * np.arcsin(np.sqrt(a))
 
 
 def _kakao_search(url: str, query: str):
-    """카카오 로컬 검색의 첫 결과 (위도, 경도, 주소) 또는 None."""
+    """First result of a Kakao Local search as (latitude, longitude, address), or None."""
     import requests
     key = KAKAO_REST_KEY.strip()
     if not key:
@@ -245,7 +249,7 @@ def _kakao_search(url: str, query: str):
 
 
 def geocode(name: str):
-    """장소 이름 -> (위도, 경도, 주소, 실제 검색어). 못 찾으면 뒤 단어를 하나씩 빼며 다시 찾는다."""
+    """Place name -> (latitude, longitude, address, query used). If nothing is found, drops the last word and tries again."""
     words = name.split()
     for n in range(len(words), 0, -1):
         query = " ".join(words[:n])
@@ -257,7 +261,7 @@ def geocode(name: str):
 
 
 def load_station_list(path: Path):
-    """기상자료개방포털 지점정보 CSV에서 현재 운영 중인 지점 (stn, name, lat, lon)."""
+    """Stations currently in operation (stn, name, lat, lon), from the KMA open data portal's station list CSV."""
     import pandas as pd
     if not path.exists():
         raise SystemExit(f"관측소 목록이 없음 - 기상자료개방포털(data.kma.go.kr) 지점정보에서 CSV를 받아 "
@@ -270,14 +274,14 @@ def load_station_list(path: Path):
         except UnicodeDecodeError:
             continue
     df.columns = [c.strip() for c in df.columns]
-    if "지점번호" not in df.columns and "지점" in df.columns:   # 내려받은 파일은 열 이름이 '지점'
+    if "지점번호" not in df.columns and "지점" in df.columns:   # the downloaded file calls this column '지점'
         df = df.rename(columns={"지점": "지점번호"})
     cols = {"지점번호": "stn", "지점명": "name", "위도": "lat", "경도": "lon"}
     missing = set(cols) - set(df.columns)
     if missing:
         raise SystemExit(f"{path.name}에 열 {sorted(missing)}이 없음 (지점정보 CSV인지 확인)")
     df = df.apply(lambda s: s.str.strip()).rename(columns=cols)
-    if "종료일" in df:                     # 위치 이력 중 현재 행만
+    if "종료일" in df:                     # only the current row of each station's location history
         df = df[df["종료일"].isna() | (df["종료일"] == "")]
     for c in ("stn", "lat", "lon"):
         df[c] = pd.to_numeric(df[c], errors="coerce")

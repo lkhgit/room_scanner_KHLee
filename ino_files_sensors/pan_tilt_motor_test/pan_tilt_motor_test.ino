@@ -1,69 +1,74 @@
 // ============================================================
-//  Room Scanner 팬·틸트 리그 — 모터 키보드 테스트
+//  Room Scanner pan-tilt rig — keyboard motor test
 //  28BYJ-48 (5V) + ULN2003 x2, Arduino UNO
 //
-//  PAN  (아랫단, 360°) : IN1~IN4 -> D7, D6, D5, D4
-//  TILT (윗단,  180°) : IN1~IN4 -> D8, D9, D10, D11
+//  PAN  (lower stage, 360°) : IN1-IN4 -> D7, D6, D5, D4
+//  TILT (upper stage, 180°) : IN1-IN4 -> D8, D9, D10, D11
 //
-//  시리얼 모니터 115200 baud. 키를 입력하고 Enter.
-//  여러 글자를 한 번에 보내면 차례로 실행됨 (예: "ddd" = 3칸)
+//  Serial monitor at 115200 baud. Type a key and press Enter.
+//  Several characters sent at once run one after the other (e.g. "ddd" = 3 steps)
 // ============================================================
 
-// ---- 기본 설정 ----------------------------------------------
-const long  STEPS_PER_REV   = 4096;          // 하프스텝 기준 (기어비 근사값)
+// ---- basic settings -----------------------------------------
+const long  STEPS_PER_REV   = 4096;          // in half steps (approximate gear ratio)
 const float STEPS_PER_DEG   = STEPS_PER_REV / 360.0;
-const unsigned long STEP_INTERVAL_US = 1200; // 스텝 간격. 탈조되면 늘릴 것 (1200~2000)
+const unsigned long STEP_INTERVAL_US = 1200; // step interval. Increase if the motor skips steps (1200-2000)
 
-const int8_t PAN_DIR  = 1;   // 방향이 반대로 돌면 -1로 변경
-const int8_t TILT_DIR = 1;   // 방향이 반대로 돌면 -1로 변경
+const int8_t PAN_DIR  = 1;   // change to -1 if it turns the wrong way
+const int8_t TILT_DIR = 1;   // change to -1 if it turns the wrong way
 
-const float TILT_MIN_DEG = -90.0;  // 시작 위치(=0°) 기준 틸트 한계
+const float TILT_MIN_DEG = -90.0;  // tilt limits relative to the start position (= 0°)
 const float TILT_MAX_DEG =  90.0;
 
-// 하프스텝 시퀀스 (IN1, IN2, IN3, IN4)
+// half-step sequence (IN1, IN2, IN3, IN4)
 const uint8_t HALF_SEQ[8][4] = {
   {1,0,0,0}, {1,1,0,0}, {0,1,0,0}, {0,1,1,0},
   {0,0,1,0}, {0,0,1,1}, {0,0,0,1}, {1,0,0,1}
 };
 
-// ---- 모터 구조체 --------------------------------------------
+// ---- motor struct -------------------------------------------
+// State of one stepper motor: pins, direction, position and target in half steps, limits.
 struct Motor {
   const char* name;
   uint8_t pins[4];
   int8_t  dirSign;
-  long    pos;          // 현재 위치 (하프스텝)
-  long    target;       // 목표 위치 (하프스텝)
+  long    pos;          // current position (half steps)
+  long    target;       // target position (half steps)
   int8_t  phase;        // 0~7
   unsigned long lastStepUs;
   bool    hasLimit;
   long    minPos, maxPos;
-  bool    holdAfterMove; // 정지 후 코일 유지 여부
+  bool    holdAfterMove; // keep the coils powered after stopping
   bool    moving;
 };
 
 Motor pan  = {"PAN",  {7, 6, 5, 4},   PAN_DIR,  0, 0, 0, 0, false, 0, 0, false, false};
 Motor tilt = {"TILT", {8, 9, 10, 11}, TILT_DIR, 0, 0, 0, 0, true,  0, 0, true,  false};
 
-float stepDeg = 5.0;  // 키 한 번당 회전 각도
+float stepDeg = 5.0;  // rotation per key press
 
-// ---- 저수준 제어 --------------------------------------------
+// ---- low-level control --------------------------------------
+// Drives a motor's coils for its current phase.
 void writeCoils(Motor &m) {
   for (int i = 0; i < 4; i++) digitalWrite(m.pins[i], HALF_SEQ[m.phase][i]);
 }
 
+// Switches a motor's coils off.
 void releaseCoils(Motor &m) {
   for (int i = 0; i < 4; i++) digitalWrite(m.pins[i], LOW);
 }
 
-void stepOnce(Motor &m, int dir) {          // dir: +1 / -1 (논리 방향)
+void stepOnce(Motor &m, int dir) {          // One half step in logical direction dir (+1 / -1).
   int physical = dir * m.dirSign;
   m.phase = (m.phase + physical + 8) % 8;
   writeCoils(m);
   m.pos += dir;
 }
 
+// Converts half steps to degrees.
 float toDeg(long steps) { return steps / STEPS_PER_DEG; }
 
+// Prints both positions and the step size.
 void printStatus() {
   Serial.print(F("PAN: "));   Serial.print(toDeg(pan.pos), 2);
   Serial.print(F("°  |  TILT: ")); Serial.print(toDeg(tilt.pos), 2);
@@ -71,7 +76,7 @@ void printStatus() {
   Serial.println(F("°"));
 }
 
-// 비차단(non-blocking) 구동: loop()마다 호출
+// Non-blocking drive: called on every loop(); takes one step when it is time and reports arrival.
 void updateMotor(Motor &m) {
   if (m.pos != m.target) {
     unsigned long now = micros();
@@ -88,7 +93,8 @@ void updateMotor(Motor &m) {
   }
 }
 
-// ---- 명령 ---------------------------------------------------
+// ---- commands -----------------------------------------------
+// Moves a motor's target by deg degrees, clamped to its limits.
 void moveBy(Motor &m, float deg) {
   long t = m.target + lround(deg * STEPS_PER_DEG);
   if (m.hasLimit) {
@@ -98,6 +104,7 @@ void moveBy(Motor &m, float deg) {
   m.target = t;
 }
 
+// Makes the current position 0° and resets the tilt limits around it.
 void setZero(Motor &m) {
   m.pos = m.target = 0;
   if (m.hasLimit) {
@@ -106,6 +113,7 @@ void setZero(Motor &m) {
   }
 }
 
+// Prints the list of keys.
 void printHelp() {
   Serial.println(F("\n==== 팬·틸트 모터 테스트 ===="));
   Serial.println(F(" a / d : PAN  -/+ 회전"));
@@ -120,6 +128,7 @@ void printHelp() {
   Serial.println(F(" * 틸트는 시작 위치를 0°(수평)로 보고 ±90°로 제한됨\n"));
 }
 
+// Runs the command for one key.
 void handleKey(char c) {
   switch (c) {
     case 'a': moveBy(pan, -stepDeg); break;
@@ -173,6 +182,7 @@ void handleKey(char c) {
 }
 
 // ---- setup / loop -------------------------------------------
+// Sets up the motor pins, zeroes both motors and prints the help.
 void setup() {
   for (int i = 0; i < 4; i++) {
     pinMode(pan.pins[i], OUTPUT);
@@ -181,13 +191,14 @@ void setup() {
   releaseCoils(pan);
   setZero(pan);
   setZero(tilt);
-  writeCoils(tilt);   // 틸트는 시작부터 위치 유지
+  writeCoils(tilt);   // the tilt holds its position from the start
 
   Serial.begin(115200);
   printHelp();
   printStatus();
 }
 
+// Reads keys and drives both motors.
 void loop() {
   while (Serial.available()) handleKey((char)Serial.read());
   updateMotor(pan);

@@ -12,6 +12,7 @@ class PlaceError(Exception):
 
 
 def _kma():
+    """Imports kma.py from the mold scanner folder, where the Kakao key lives."""
     if str(MOLD_DIR) not in sys.path:
         sys.path.insert(0, str(MOLD_DIR))
     import kma
@@ -19,6 +20,7 @@ def _kma():
 
 
 def _get(url, params):
+    """Calls a Kakao Local API endpoint and returns its documents, turning failures into PlaceError."""
     import requests
     kma = _kma()
     key = kma.KAKAO_REST_KEY.strip()
@@ -37,6 +39,7 @@ def _get(url, params):
 
 
 def search(query):
+    """Searches Seoul places by keyword first, then by address, and returns label, sub-label and coordinates."""
     kma = _kma()
     out = [{"label": d["place_name"], "sub": d.get("road_address_name") or d.get("address_name") or "",
             "lat": float(d["y"]), "lng": float(d["x"])}

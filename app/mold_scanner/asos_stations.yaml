@@ -1,3 +1,3 @@
-# ASOS 관측소 좌표 (손으로 적는 표). 초단기실황 격자를 정할 때 site.lat/lon이 없으면 쓴다.
-# 여기에 없는 관측소는 asos_stations.csv(기상자료개방포털 지점정보)에서 찾는다.
+# ASOS station coordinates (hand-written table). Used to pick the ultra-short-term observation grid cell when site.lat/lon is missing.
+# Stations not listed here are looked up in asos_stations.csv (station list from the KMA open data portal).
 108: {name: 서울, lat: 37.5714, lon: 126.9658}

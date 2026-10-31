@@ -1,3 +1,7 @@
+"""Takes a screenshot of a page in headless Chromium and prints its first console messages.
+
+    py tools/shot.py <url> <out.png> [x,y]      (x,y: optional point to click before the screenshot)
+"""
 import sys
 from playwright.sync_api import sync_playwright
 url, out = sys.argv[1], sys.argv[2]

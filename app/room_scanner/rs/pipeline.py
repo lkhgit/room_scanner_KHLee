@@ -28,6 +28,7 @@ _running_lock = threading.Lock()
 
 
 def _claim(key) -> bool:
+    """Marks a job as running; returns False if it already is."""
     with _running_lock:
         if key in _running:
             return False
@@ -36,6 +37,7 @@ def _claim(key) -> bool:
 
 
 def _release(key) -> None:
+    """Marks a job as no longer running."""
     with _running_lock:
         _running.discard(key)
 
@@ -61,11 +63,13 @@ def run_script(script, args, cwd, log_path, on_line=None):
 
 
 def _key(*parts) -> str:
+    """Makes a short hash key from the given values, used to name result folders."""
     return hashlib.sha1("|".join(map(str, parts)).encode()).hexdigest()[:10]
 
 
 # ------------------------------------------------------------------ start / restart
 def start(room_id: str) -> None:
+    """Starts processing a new room: the photo branch if it has photos, and the mold step."""
     r = rooms.load(room_id)
     if r["has"]["photos"] or r["has"]["panorama"]:
         threading.Thread(target=photo_branch, args=(room_id,), daemon=True).start()
@@ -77,6 +81,7 @@ def start(room_id: str) -> None:
 
 
 def retry(room_id: str, step: str) -> None:
+    """Runs a failed or finished step again in the background."""
     if step in ("stitch", "model", "sun"):
         threading.Thread(target=photo_branch, args=(room_id, True), daemon=True).start()
     elif step == "mold":
@@ -104,6 +109,7 @@ def recover_after_restart() -> None:
 
 # ------------------------------------------------------------------ photo branch
 def photo_branch(room_id: str, force: bool = False) -> None:
+    """Runs stitch, model and sun in order, stopping at the first step that fails."""
     if not _claim((room_id, "photo")):
         return
     try:
@@ -113,10 +119,12 @@ def photo_branch(room_id: str, force: bool = False) -> None:
 
 
 def _done(room_id, step, force):
+    """Tells whether a step is already done and does not need to run again."""
     return not force and rooms.load(room_id)["steps"][step]["state"] == "done"
 
 
 def stitch_step(room_id, force=False) -> bool:
+    """Stitches the bundle's photos into a panorama, or uses the panorama shipped in the bundle."""
     d = rooms.room_dir(room_id)
     work = d / "work" / "stitch"
     work.mkdir(parents=True, exist_ok=True)
@@ -128,7 +136,7 @@ def stitch_step(room_id, force=False) -> bool:
         shutil.copy(src, work / src.name)
         rooms.set_step(room_id, "stitch", "done", "Using the panorama from the bundle.")
         return True
-    # OpenCV on Windows cannot open paths with non-ASCII characters (e.g. "메이커 최종"),
+    # OpenCV on Windows cannot open paths with non-ASCII characters (e.g. a Korean folder name),
     # so the scripts work on a copy of the photos in an ASCII-only temp folder.
     with tempfile.TemporaryDirectory(prefix="rs_stitch_", dir=_ascii_tmp()) as tmp:
         photos = Path(tmp) / "photos"
@@ -186,15 +194,18 @@ def _ascii_tmp():
 
 
 def panorama_path(room_id):
+    """Returns the room's stitched panorama, or None."""
     d = rooms.room_dir(room_id) / "work" / "stitch"
     return next((p for p in d.glob("panorama.*") if "1024x512" not in p.name), None)
 
 
 def model_dir(room_id):
+    """Returns the folder that holds the room's 3D model."""
     return rooms.room_dir(room_id) / "work" / "model" / "panorama"
 
 
 def model_step(room_id, force=False) -> bool:
+    """Builds the 3D room model from the panorama."""
     mdir = model_dir(room_id)
     if _done(room_id, "model", force) and (mdir / "room.glb").exists():
         return True
@@ -218,15 +229,18 @@ def model_step(room_id, force=False) -> bool:
 
 # ------------------------------------------------------------------ sunlight (re-run when conditions change)
 def season_dates(year):
+    """Returns the two solstices and two equinoxes of a year."""
     return [date(year, 12, 21), date(year, 3, 20), date(year, 6, 21), date(year, 9, 22)]
 
 
 def sun_dir(room_id, params, day):
+    """Returns the result folder for one sunlight calculation (location, heading and date)."""
     k = _key(round(params["lat"], 4), round(params["lon"], 4), params.get("heading_deg") or 0, day)
     return rooms.room_dir(room_id) / "work" / "sun" / k
 
 
 def sun_step(room_id, day=None) -> bool:
+    """Calculates sunlight for one date, unless that result already exists."""
     r = rooms.load(room_id)
     p = r["params"]
     if p["lat"] is None or p["lon"] is None:
@@ -257,14 +271,17 @@ def sun_step(room_id, day=None) -> bool:
 
 # ------------------------------------------------------------------ mold
 def sim_year():
+    """Returns the year the mold simulation covers."""
     return CFG["mold"].get("sim_year") or date.today().year - 1
 
 
 def mold_dir(room_id, p):
+    """Returns the result folder for the mold simulation at the room's location."""
     return rooms.room_dir(room_id) / "work" / "mold" / _key(round(p["lat"], 4), round(p["lon"], 4), sim_year())
 
 
 def mold_result(room_id):
+    """Returns the mold viewer JSON file if the simulation has finished, else None."""
     p = rooms.load(room_id)["params"]
     if p["lat"] is None or p["lon"] is None:
         return None
@@ -273,6 +290,7 @@ def mold_result(room_id):
 
 
 def mold_step(room_id, force=False) -> bool:
+    """Runs the mold simulation for the room's location, downloading weather data on the first run."""
     r = rooms.load(room_id)
     p = r["params"]
     if p["lat"] is None or p["lon"] is None:

@@ -1,9 +1,9 @@
 """
-check_model.mjs가 비교할 기준값을 만든다. Grid-level prediction.py의 predict_scenario와 같은 식을
-scenario_params.json 원본 정밀도로 계산한다 (앱의 model.json은 소수점 4자리로 줄인 값).
+Writes the reference values check_model.mjs compares against. Uses the same formula as predict_scenario in
+Grid-level prediction.py, at the full precision of scenario_params.json (the app's model.json is rounded to 4 decimals).
 
-실행:
-    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "flood-app\\tools\\check_reference.py"
+Run:
+    py "flood-app\\tools\\check_reference.py"     (from flood_risk_ML)
 """
 import json
 import os
@@ -15,10 +15,11 @@ TOOLS_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(os.path.dirname(TOOLS_DIR))
 PARAMS_PATH = os.path.join(BASE_DIR, "Grid-level prediction results", "scenario_params.json")
 META_PATH = os.path.join(os.path.dirname(TOOLS_DIR), "data", "meta.json")
-QUANTILE_CELLS = 200  # 분위수는 격자 일부만 비교
+QUANTILE_CELLS = 200  # quantiles are compared for a sample of cells only
 
 
 def predict(params, pc):
+    """Flood probability of every posterior sample and grid cell for the slider values pc (full precision)."""
     alpha, beta = np.asarray(params["alpha"]), np.asarray(params["beta"])
     labels, log_q = np.asarray(params["cluster"]), np.asarray(params["log_q"])
     z = (np.asarray(pc[:3]) - np.asarray(params["pc_mean"])) / np.asarray(params["pc_std"])
@@ -26,6 +27,7 @@ def predict(params, pc):
 
 
 def main():
+    """Writes reference.json with the mean probabilities and sampled quantiles for every preset."""
     with open(PARAMS_PATH, encoding="utf-8") as f:
         params = json.load(f)
     with open(META_PATH, encoding="utf-8") as f:

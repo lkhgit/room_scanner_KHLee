@@ -1,6 +1,8 @@
 // Scan wizard: room details -> photo module -> surface module -> room. The server owns the scan state.
 const $ = (s, r = document) => r.querySelector(s);
+// Escapes text for safe use inside HTML.
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// POSTs JSON to the server and throws an Error with the server's message if the request fails.
 const post = async (url, body) => {
   const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   const b = await r.json().catch(() => ({}));
@@ -15,6 +17,7 @@ const MATERIALS = [["very_sensitive", "Very sensitive (wood, paper, gypsum board
   ["medium_resistant", "Medium resistant (cement, plastic)"], ["resistant", "Resistant (glass, metal, tile)"]];
 const KEYS = { w: ["tilt", 1], s: ["tilt", -1], a: ["pan", -1], d: ["pan", 1] };
 
+// Mounts the scan wizard into app and returns a function that removes it.
 export function mountScan(app) {
   let st = { stage: null }, shown = undefined, timer = null, stopped = false, ports = [], size = "medium", busy = false;
   let previewOn = false, previewUrl = null, lastShot = null;
@@ -29,7 +32,9 @@ export function mountScan(app) {
     act(() => post("/api/scan/cancel"));
   };
 
+  // Shows an error message above the wizard, or clears it.
   function error(msg) { $("#err").innerHTML = msg ? `<div class="notice bad">${esc(msg)}</div>` : ""; }
+  // Runs one wizard action with the buttons disabled, then redraws with the new state.
   async function act(fn) {
     if (busy) return; busy = true; error("");
     document.querySelectorAll("#body button").forEach((b) => b.disabled = true);
@@ -38,16 +43,20 @@ export function mountScan(app) {
     document.querySelectorAll("#body button").forEach((b) => b.disabled = false);
     render(false);
   }
+  // Loads the list of serial ports from the server.
   async function loadPorts() {
     try { const r = await fetch("/api/scan/ports"); const b = await r.json(); if (!r.ok) throw new Error(b.error); ports = b; }
     catch (e) { ports = []; error(e.message); }
   }
+  // Returns the HTML for a serial port drop-down.
   const portSelect = (id, label, hint) => `<label>${label}<select id="${id}">
       <option value="">Choose a port…</option>${ports.map((p) => `<option value="${esc(p.device)}">${esc(p.device)} — ${esc(p.description)}</option>`).join("")}</select>
       <span class="dim">${hint}</span></label>`;
+  // Restores a port choice from localStorage and saves it when it changes.
   const remember = (id) => { const el = $("#" + id); if (!el) return; try { el.value = localStorage.getItem("port_" + id) || ""; } catch {}
     el.onchange = () => { try { localStorage.setItem("port_" + id, el.value); } catch {} }; };
 
+  // Draws the step indicator and the scan log.
   function renderWiz() {
     const cur = STEPS.findIndex(([k]) => k === STEP_OF[st.stage]);
     $("#wiz").innerHTML = STEPS.map(([, l], i) => `<li class="${i < cur ? "done" : i === cur ? "on" : ""}">${l}</li>`).join("");
@@ -163,6 +172,7 @@ export function mountScan(app) {
     live();
   }
 
+  // Updates the live numbers (angles, progress, face count) without redrawing the step.
   function live() {
     const p = st.photo || {}, s = st.surface || {};
     if (st.stage === "leveling" && $("#pos")) {
@@ -184,10 +194,12 @@ export function mountScan(app) {
     }
   }
 
+  // Moves the rig one step on the axis for a W/A/S/D key.
   async function nudge(k) {
     const [axis, dir] = KEYS[k];
     try { const r = await post("/api/scan/photo/move", { axis, size, dir }); st = r; live(); } catch (e) { error(e.message); }
   }
+  // Handles the leveling keys: W/A/S/D to move, 1/2/3 for step size, Enter to start the capture.
   function onKey(e) {
     if (st.stage !== "leveling" || e.target.closest("input,select,textarea")) return;
     const k = e.key.toLowerCase();
@@ -197,6 +209,7 @@ export function mountScan(app) {
   }
   addEventListener("keydown", onKey);
 
+  // Keeps fetching camera frames for the leveling preview while it is shown.
   async function previewLoop() {
     while (previewOn && !stopped) {
       try {
@@ -209,6 +222,7 @@ export function mountScan(app) {
     }
   }
 
+  // Reloads the scan state from the server and redraws, faster while capturing or scanning.
   async function poll() {
     clearTimeout(timer);
     try { const r = await fetch("/api/scan"); if (r.ok) st = await r.json(); } catch { /* keep polling */ }

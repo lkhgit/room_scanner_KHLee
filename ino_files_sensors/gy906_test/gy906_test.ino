@@ -1,13 +1,13 @@
-// GY-906 (MLX90614) 적외선 온도 센서 테스트 - Arduino Uno
-// 배선: VIN -> 5V (모듈에 레귤레이터가 없으면 3.3V), GND -> GND, SCL -> A5, SDA -> A4
-// 필요 라이브러리: "Adafruit MLX90614 Library" (라이브러리 매니저에서 설치)
+// GY-906 (MLX90614) infrared temperature sensor test - Arduino Uno
+// Wiring: VIN -> 5V (3.3V if the module has no regulator), GND -> GND, SCL -> A5, SDA -> A4
+// Library needed: "Adafruit MLX90614 Library" (install it from the Library Manager)
 
 #include <Wire.h>
 #include <Adafruit_MLX90614.h>
 
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 
-// I2C 버스에 연결된 장치 주소를 찾아 출력 (MLX90614는 보통 0x5A)
+// Finds and prints the addresses of the devices on the I2C bus (the MLX90614 is usually 0x5A).
 void scanI2C() {
   Serial.println("I2C 장치 검색 중...");
   int found = 0;
@@ -23,6 +23,7 @@ void scanI2C() {
   if (found == 0) Serial.println("  장치 없음 -> 배선(SDA/SCL 바뀜, 전원)을 확인하세요");
 }
 
+// Scans the bus, starts the sensor and prints its emissivity.
 void setup() {
   Serial.begin(9600);
   while (!Serial) {}
@@ -38,9 +39,10 @@ void setup() {
   Serial.println("주변온도(C)\t물체온도(C)");
 }
 
+// Prints the ambient and object temperature twice a second.
 void loop() {
-  float ambient = mlx.readAmbientTempC();  // 센서 자체(주변) 온도
-  float object  = mlx.readObjectTempC();   // 센서가 바라보는 물체 표면 온도
+  float ambient = mlx.readAmbientTempC();  // temperature of the sensor itself (ambient)
+  float object  = mlx.readObjectTempC();   // surface temperature of the object the sensor faces
 
   Serial.print(ambient, 2);
   Serial.print("\t\t");

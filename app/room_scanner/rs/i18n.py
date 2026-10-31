@@ -41,6 +41,7 @@ _PROV = re.compile(r"^잠정 결과: 대체값 사용\((.+)\)$")
 
 
 def warning(text: str) -> str:
+    """Translates one Korean simulator warning into English, or returns a generic line if it is unknown."""
     if not re.search(r"[가-힣]", text):
         return text
     for pat, fn in _RULES:
@@ -51,6 +52,7 @@ def warning(text: str) -> str:
 
 
 def provisional(text):
+    """Translates the simulator's "provisional result" message into English."""
     if not text:
         return None
     m = _PROV.match(text)
@@ -75,4 +77,5 @@ def provisional(text):
 
 
 def bearing_name(b: float) -> str:
+    """Returns the 8-point compass name (N, NE, ...) for a bearing in degrees."""
     return ["N", "NE", "E", "SE", "S", "SW", "W", "NW"][int(((b % 360) + 22.5) // 45) % 8]

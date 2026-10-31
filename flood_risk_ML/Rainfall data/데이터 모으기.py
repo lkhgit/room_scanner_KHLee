@@ -1,3 +1,5 @@
+"""Merges the KMA rainfall CSV downloads in this folder into one file, 강우량_2009_2026.csv,
+dropping rows that repeat the same station and time."""
 import csv
 import glob
 import os
@@ -11,7 +13,7 @@ files = sorted(
 )
 
 header = None
-rows = {}  # (지점, 일시) -> row, 겹치는 시간은 하나만 남김
+rows = {}  # (station, time) -> row; overlapping times keep a single row
 total = 0
 conflicts = 0
 

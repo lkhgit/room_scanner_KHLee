@@ -1,19 +1,19 @@
 """
-강우 PC(PC1~PC4)로 클러스터별 연간 침수 비율을 예측하는 계층 로지스틱 회귀 모델.
-('클러스터 침수 비율 계층 로지스틱 회귀 계획' 문서 구현)
+Hierarchical logistic regression that predicts each cluster's annual flooded share from the rainfall PCs (PC1-PC4).
+(implements the document 'Hierarchical logistic regression plan for cluster flood shares')
 
-1. 학습 테이블: combo를 '+'로 나눠 격자 x 침수 연도 -> 클러스터 x 연도의 침수 비율 r = k / n
-2. PC 표준화: 학습 연도 기준 축별 표준화 (z1~z4)
-3. 연도 단위 교차검증: 뺀 연도를 제외하고 격자 클러스터링부터 다시 한 뒤,
-   기후 기준선 / 완전 풀링 / 클러스터별 Firth / 계층 모델(베타, 베르누이 x PC 3개, 4개)을 비교
-4. 최종 모델: 교차검증 Brier 점수가 가장 낮은 계층 모델 설정으로 전체 데이터 학습
-5. 점검: 사전 예측 점검, 수렴 기준(R-hat, ESS, divergence), 사후 예측 점검, 계수 수축
-6. 출력: 클러스터별 / 격자별 연간 침수 확률과 90% 구간, 2년 거주 기준 확률
+1. Training table: split combo at '+' into cell × flood year -> flooded share per cluster × year, r = k / n
+2. PC standardisation: each axis standardised on the training years (z1-z4)
+3. Year-by-year cross-validation: leave a year out, redo the grid clustering from scratch, then compare the climate
+   baseline / complete pooling / per-cluster Firth / hierarchical models (beta, Bernoulli × 3 or 4 PCs)
+4. Final model: trained on all data with the hierarchical setting that has the lowest cross-validated Brier score
+5. Checks: prior predictive check, convergence (R-hat, ESS, divergences), posterior predictive check, coefficient shrinkage
+6. Output: annual flood probability per cluster / per grid cell with 90% intervals, and the probability over a 2-year stay
 
-침수흔적도 자료가 없는 2015, 2021년은 '침수 없음'이 아니라 결측이므로 학습과 검증에서 뺀다.
-강우 시나리오(연간 확률 평균)에는 PC가 있는 모든 연도(2010~2026)를 쓴다.
+2015 and 2021 have no flood trace maps; they are missing, not 'no flood', so they are left out of training and validation.
+The rainfall scenarios (averaged annual probability) use every year that has PCs (2010-2026).
 
-실행:
+Run:
     & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "cluster-level prediction.py"
 """
 import importlib.util
@@ -33,7 +33,7 @@ PC_PATH = os.path.join(BASE_DIR, "rainfall data final ver.csv")
 CLUSTERING_PATH = os.path.join(BASE_DIR, "grid clustering.py")
 OUT_DIR = os.path.join(BASE_DIR, "Prediction model results")
 
-NO_DATA_YEARS = [2015, 2021]  # 침수흔적도 자료 없음
+NO_DATA_YEARS = [2015, 2021]  # no flood trace map data
 TRAIN_YEARS = [y for y in range(2010, 2026) if y not in NO_DATA_YEARS]
 PC_COLS = ["PC1", "PC2", "PC3", "PC4"]
 Z_COLS = ["z1", "z2", "z3", "z4"]
@@ -41,7 +41,7 @@ LIVING_YEARS = 2
 
 CHAINS = 4
 DRAWS, TUNE = 2000, 2000
-CV_DRAWS, CV_TUNE = 1000, 1000  # 교차검증은 fold가 많아 표본 수를 줄인다
+CV_DRAWS, CV_TUNE = 1000, 1000  # cross-validation has many folds, so it uses fewer samples
 TARGET_ACCEPT, RETRY_TARGET_ACCEPT = 0.95, 0.99
 SEED = 42
 
@@ -51,7 +51,7 @@ RELIABILITY_BINS = [0, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0]
 
 
 def load_clustering_module():
-    """'grid clustering.py'의 cluster_cells를 교차검증 재클러스터링에 쓴다."""
+    """Loads cluster_cells from 'grid clustering.py' for re-clustering inside the cross-validation."""
     spec = importlib.util.spec_from_file_location("grid_clustering", CLUSTERING_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -59,13 +59,14 @@ def load_clustering_module():
 
 
 def load_inputs():
+    """Reads the grid clusters and the yearly rainfall PCs."""
     grid = pd.read_csv(GRID_PATH, encoding="utf-8-sig").set_index("cell_id")
     pcs = pd.read_csv(PC_PATH, encoding="utf-8-sig").set_index("year")[PC_COLS]
     return grid, pcs
 
 
 def history_from_combo(combo):
-    """combo('2010+2022' 형태)를 '+'로 나눠 격자 x 학습 연도 침수 여부(0/1) 표를 만든다."""
+    """Splits combo (like '2010+2022') at '+' into a cell × training year table of flooded (0/1)."""
     years = combo.str.split("+").explode().astype(int)
     history = pd.crosstab(years.index, years).reindex(index=combo.index, columns=TRAIN_YEARS, fill_value=0)
     history.index.name = "cell_id"
@@ -73,7 +74,7 @@ def history_from_combo(combo):
 
 
 def build_table(history, labels, years):
-    """클러스터 x 연도 학습 테이블: n_cells, n_flooded, r."""
+    """Cluster × year training table: n_cells, n_flooded, r."""
     n_cells = labels.value_counts().sort_index()
     k = history[years].groupby(labels).sum()
     table = k.stack().reset_index()
@@ -84,7 +85,7 @@ def build_table(history, labels, years):
 
 
 def standardize(pcs, years):
-    """PC를 축마다 학습 연도의 평균, 표준편차로 표준화. 모든 연도(시나리오 포함)에 같은 값을 적용."""
+    """Standardises each PC axis with the mean and standard deviation of the training years, applied to every year (scenarios included)."""
     mean, std = pcs.loc[years].mean(), pcs.loc[years].std(ddof=0)
     z = (pcs - mean) / std
     z.columns = Z_COLS
@@ -92,12 +93,12 @@ def standardize(pcs, years):
 
 
 def shrink_ratio(r, n_rows):
-    """베타 분포가 0, 1을 다루도록 안쪽으로 당긴 r*."""
+    """r* = r pulled inwards so the beta distribution can handle 0 and 1."""
     return (r * (n_rows - 1) + 0.5) / n_rows
 
 
 def build_model(table, n_pcs, obs, pooled=False):
-    """계층 로지스틱 회귀 (비중심화). pooled=True면 모든 클러스터에 α, β 한 세트(완전 풀링)."""
+    """Hierarchical logistic regression (non-centred). pooled=True uses one α, β for all clusters (complete pooling)."""
     n_clusters = int(table["cluster"].max()) + 1
     cluster_idx = table["cluster"].values
     Z = table[Z_COLS[:n_pcs]].values
@@ -134,7 +135,7 @@ def build_model(table, n_pcs, obs, pooled=False):
 
 
 def diagnose(idata, model):
-    """수렴 기준: 모든 자유 파라미터의 R-hat < 1.01, ESS > 400, divergence 0개."""
+    """Convergence criteria: R-hat < 1.01 and ESS > 400 for every free parameter, and no divergences."""
     var_names = [v.name for v in model.free_RVs]
     summary = az.summary(idata, var_names=var_names, round_to="none")
     return {
@@ -145,11 +146,12 @@ def diagnose(idata, model):
 
 
 def is_converged(diag):
+    """Tells whether the diagnostics meet the convergence criteria."""
     return diag["rhat_max"] < RHAT_MAX and diag["ess_min"] > ESS_MIN and diag["divergences"] == 0
 
 
 def fit(table, n_pcs, obs, pooled=False, draws=DRAWS, tune=TUNE):
-    """NUTS 샘플링. divergence가 남으면 target_accept를 올려 한 번 다시 샘플링."""
+    """NUTS sampling. If divergences remain, raises target_accept and samples once more."""
     model = build_model(table, n_pcs, obs, pooled)
     for target_accept in (TARGET_ACCEPT, RETRY_TARGET_ACCEPT):
         with model:
@@ -163,19 +165,20 @@ def fit(table, n_pcs, obs, pooled=False, draws=DRAWS, tune=TUNE):
 
 
 def posterior_draws(idata, name):
+    """Posterior samples of one variable with the chains merged."""
     values = idata.posterior[name].values
     return values.reshape(-1, *values.shape[2:])
 
 
 def predict_mu(idata, Z):
-    """사후 표본별 μ. Z: (연도 수, PC 수) -> (표본 수, 클러스터 수, 연도 수)."""
+    """μ for every posterior sample. Z: (years, PCs) -> (samples, clusters, years)."""
     alpha = posterior_draws(idata, "alpha")
     beta = posterior_draws(idata, "beta")
     return expit(alpha[:, :, None] + np.einsum("sck,yk->scy", beta, Z))
 
 
 def firth_logit(X, y, max_iter=200, tol=1e-8):
-    """Firth 벌점 로지스틱 회귀 (y는 0~1 비율 허용). 완벽 분리에서도 계수가 유한하게 남는다."""
+    """Firth-penalised logistic regression (y may be a share in 0-1). Coefficients stay finite even with perfect separation."""
     b = np.zeros(X.shape[1])
     for _ in range(max_iter):
         mu = expit(X @ b)
@@ -191,6 +194,7 @@ def firth_logit(X, y, max_iter=200, tol=1e-8):
 
 
 def score(r, pred):
+    """Brier score and log loss of predicted shares against the actual ones."""
     p = np.clip(pred, 1e-6, 1 - 1e-6)
     return {
         "brier": float(np.mean((pred - r) ** 2)),
@@ -198,10 +202,10 @@ def score(r, pred):
     }
 
 
-# ---------------------------------------------------------------- 교차검증
+# ---------------------------------------------------------------- cross-validation
 
 def cv_fold(holdout, history, xy, pcs, clustering):
-    """한 연도를 빼고 재클러스터링 -> 학습 -> 뺀 연도 예측. 예측 행과 '예측 불가' 비율을 반환."""
+    """Leaves one year out, re-clusters, trains and predicts the held-out year. Returns the prediction rows and the 'unpredictable' share."""
     train_years = [y for y in TRAIN_YEARS if y != holdout]
     hist_tr = history[train_years]
     keep = hist_tr.sum(axis=1) > 0
@@ -213,7 +217,7 @@ def cv_fold(holdout, history, xy, pcs, clustering):
     table = table.join(z, on="year")
     z_hold = z.loc[[holdout]].values
 
-    # 뺀 연도의 실제 비율 (1단계 클러스터에 대응)
+    # actual shares of the held-out year (matched to the step-1 clusters)
     k_hold = history.loc[keep[keep].index, holdout].groupby(labels).sum()
     n_cells = labels.value_counts().sort_index()
     actual = pd.DataFrame({"cluster": n_cells.index, "n_cells": n_cells.values,
@@ -224,6 +228,7 @@ def cv_fold(holdout, history, xy, pcs, clustering):
     preds = []
 
     def add(model_name, pred, lo=None, hi=None, diag=None):
+        """Adds one model's predictions for the held-out year to the results."""
         df = actual.copy()
         df["model"], df["pred"] = model_name, pred
         df["lo"] = np.nan if lo is None else lo
@@ -250,7 +255,7 @@ def cv_fold(holdout, history, xy, pcs, clustering):
         if obs == "beta":
             phi = posterior_draws(idata, "phi")[:, None]
             r_rep = rng.beta(mu * phi, (1 - mu) * phi)
-            # 구간은 r* 척도이므로 구간 적중률은 실제 r도 r*로 바꿔 비교한다 (cv_metrics)
+            # the intervals are on the r* scale, so interval coverage compares against the actual r turned into r* (cv_metrics)
             lo, hi = np.quantile(r_rep, [0.05, 0.95], axis=0)
         add(name, mu.mean(axis=0), lo, hi, diag)
         status = "OK" if is_converged(diag) else "수렴 실패"
@@ -264,7 +269,7 @@ def cv_fold(holdout, history, xy, pcs, clustering):
 
 
 def cv_metrics(preds, unpredictable):
-    """모델 x 연도 x 지표 (long format)."""
+    """Model × year × metric (long format)."""
     rows = []
     for (model, year), g in preds.groupby(["model", "year"]):
         m = score(g["r"].values, g["pred"].values)
@@ -279,7 +284,7 @@ def cv_metrics(preds, unpredictable):
 
 
 def cv_summary(preds):
-    """모든 클러스터-연도 행에 대한 평균 지표."""
+    """Mean metrics over all cluster-year rows."""
     rows = []
     for model, g in preds.groupby("model"):
         m = {"model": model, **score(g["r"].values, g["pred"].values)}
@@ -291,6 +296,7 @@ def cv_summary(preds):
 
 
 def reliability(preds):
+    """Reliability curve: mean predicted vs actual share in each prediction bin, per model."""
     preds = preds.assign(bin=pd.cut(preds["pred"], RELIABILITY_BINS, include_lowest=True))
     return (preds.groupby(["model", "bin"], observed=True)
             .agg(n=("r", "size"), mean_pred=("pred", "mean"), mean_actual=("r", "mean"))
@@ -298,6 +304,7 @@ def reliability(preds):
 
 
 def run_cv(grid, pcs):
+    """Runs the leave-one-year-out cross-validation over all training years."""
     clustering = load_clustering_module()
     history = history_from_combo(grid["combo"])
     xy = grid[["x", "y"]].values
@@ -315,10 +322,10 @@ def run_cv(grid, pcs):
     return preds, cv_metrics(preds, unpredictable)
 
 
-# ---------------------------------------------------------------- 최종 모델 점검
+# ---------------------------------------------------------------- final model checks
 
 def prior_predictive_check(model):
-    """데이터를 보기 전 예측 비율 μ가 0과 1에만 몰리지 않는지 확인."""
+    """Checks that the predicted share μ before seeing the data does not pile up at 0 and 1."""
     with model:
         prior = pm.sample_prior_predictive(draws=1000, random_seed=SEED)
     mu = prior.prior["mu"].values.ravel()
@@ -327,7 +334,7 @@ def prior_predictive_check(model):
 
 
 def posterior_predictive_check(idata, table, obs):
-    """모델로 다시 생성한 비율 분포를 실제 분포와 비교."""
+    """Compares the distribution of shares regenerated from the model with the actual one."""
     rng = np.random.default_rng(SEED)
     mu = posterior_draws(idata, "mu")
     if obs == "beta":
@@ -346,10 +353,11 @@ def posterior_predictive_check(idata, table, obs):
 
 
 def coefficient_table(idata, table, n_pcs):
-    """클러스터별 α, β의 평균과 90% 구간. n_major_years: r >= 0.5인 연도 수 (수축 확인용)."""
+    """Mean and 90% interval of α, β per cluster. n_major_years: number of years with r >= 0.5 (to check shrinkage)."""
     pcs = PC_COLS[:n_pcs]
 
     def summarize(values, prefix):
+        """Mean and 5-95% quantiles of a set of samples."""
         return {f"{prefix}_mean": values.mean(), f"{prefix}_q05": np.quantile(values, 0.05),
                 f"{prefix}_q95": np.quantile(values, 0.95)}
 
@@ -371,7 +379,7 @@ def coefficient_table(idata, table, n_pcs):
 
 
 def annual_risk(idata, z_all, n_pcs):
-    """P_c = 과거 각 연도의 강우가 다시 온다고 보고 평균한 연간 침수 확률. 사후 표본별로 계산."""
+    """P_c = annual flood probability averaged as if each past year's rainfall came again. Computed per posterior sample."""
     mu = predict_mu(idata, z_all[Z_COLS[:n_pcs]].values)
     p = mu.mean(axis=2)
     p_living = 1 - (1 - p) ** LIVING_YEARS
@@ -387,6 +395,7 @@ def annual_risk(idata, z_all, n_pcs):
 
 
 def main():
+    """Builds the training table, cross-validates the models, fits and checks the final model, and saves the annual flood risks."""
     os.makedirs(OUT_DIR, exist_ok=True)
     pd.set_option("display.width", 250)
 

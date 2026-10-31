@@ -1,20 +1,34 @@
-# room_scanner_KHLee
+# Room Scanner – Semi-basement Room Evaluator
+
+A pan-tilt scanning rig and web app that evaluates a semi-basement room for three risks that are hard to judge on a short viewing: **lack of sunlight, mold growth, and flooding**.
+
+**[▶ Demo video (2 min)](https://youtu.be/WD72YnWC070)** · **[🌐 Live demo](https://lkhgit.github.io/room_scanner_KHLee/)** (precomputed scan, runs in the browser)
+
+[![Demo video](https://img.youtube.com/vi/WD72YnWC070/hqdefault.jpg)](https://youtu.be/WD72YnWC070)
+
+## Why
+
+In the 1970s, amid military tension with North Korea, many residential buildings in Seoul were required to include basements that could serve as shelters. Over time, these spaces were converted into low-cost housing, and today semi-basement homes (*banjiha*) are among the cheapest places to live in the city.
+
+Their structure makes poor living conditions common: little sunlight, damp walls that grow mold, and a high risk of flooding during heavy rain. These problems are hard to notice during a short visit before signing a lease. Room Scanner was built to measure and evaluate them, so that a prospective tenant can see the risks before moving in.
+
+## What it does
+
+| Risk | How the room is evaluated |
+|---|---|
+| **Sunlight** | A camera on a pan-tilt rig captures a panorama, which is turned into a 3D room model. Windows are detected on the walls, and the sun's path is used to estimate how much direct light enters the room. |
+| **Mold** | A surface sensor (IR thermometer + humidity sensor) scans the walls. Combined with outdoor weather data, it estimates where condensation and mold growth are likely. |
+| **Flood** | A model trained on Seoul's flood records and rainfall data estimates the flood risk of the room's location. |
 
 ## Quick start
 
-**Step 1. Download the repository.** Opening `index.html` on the GitHub website shows only its source code, so you need a copy on your computer:
+**Step 1. See the demo online (no download, no installation).** Open https://lkhgit.github.io/room_scanner_KHLee/ in your browser (use Chrome or Edge). The page needs an internet connection.
+
+**Step 2. Download the repository** (only needed to run the full app). Opening files on the GitHub website shows only their source code, so you need a copy on your computer:
 
     git clone https://github.com/lkhgit/room_scanner_KHLee.git
 
 Or, on the GitHub page, click **Code → Download ZIP** and extract the ZIP file.
-
-To see only the demo, you can download just the `docs` folder instead of the whole repository:
-
-    git clone --depth 1 --filter=blob:none --sparse https://github.com/lkhgit/room_scanner_KHLee.git
-    cd room_scanner_KHLee
-    git sparse-checkout set docs
-
-**Step 2. See the demo (no installation).** In the downloaded folder, open `docs` and double-click `index.html`. It opens in your browser (use Chrome or Edge). The page needs an internet connection.
 
 **Step 3. Run the full app.** You need Python 3.10 or later. In a terminal at the repository root, run:
 
@@ -54,7 +68,9 @@ Download `resnet50_rnn__mp3d.pth` (linked in the HorizonNet README) into `app/su
 
 ## 2. Demo (docs)
 
-Double-click [docs/index.html](docs/index.html). It shows a precomputed scan of one real classroom and runs without a server. An internet connection is needed for the 3D library and map tiles.
+Open the live demo: https://lkhgit.github.io/room_scanner_KHLee/ (served by GitHub Pages from the [docs](docs) folder). It shows a precomputed scan of one real classroom and runs without a server. An internet connection is needed for the 3D library and map tiles.
+
+To view it offline, download the repository and double-click [docs/index.html](docs/index.html).
 
 Uploading or processing scans, connecting devices, recalculating, and live weather or place search work only in the full app. See [docs/README.md](docs/README.md) for details.
 

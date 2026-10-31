@@ -1,16 +1,16 @@
 """
-서울 AWS 관측소 강우 권역화 + 시각화
+Rainfall zonation of Seoul's AWS stations + charts
 
-문서 '서울 강수량 권역화 코드 계획'을 따른다.
-  1. 로드와 정리          load_hourly
-  2. 관측소 권역화        station_correlation, cluster_stations
-  3. 관측소 × 연도 요약   station_year_summary
-  4. 권역 × 연도 집계     region_year_features
-  5. 검증                 validate
-  6. 시각화               plot_regions
+Follows the document 'Seoul rainfall zonation code plan'.
+  1. Load and clean          load_hourly
+  2. Station zonation        station_correlation, cluster_stations
+  3. Station × year summary  station_year_summary
+  4. Region × year features  region_year_features
+  5. Validation              validate
+  6. Charts                  plot_regions
 
-필요 패키지: pandas, numpy, scipy, matplotlib
-선택 패키지: pyarrow(parquet 저장), geopandas + shapely(권역 지도), plotly(생키 그림)
+Required packages: pandas, numpy, scipy, matplotlib
+Optional packages: pyarrow (parquet output), geopandas + shapely (region map), plotly (Sankey diagram)
 """
 
 from pathlib import Path
@@ -28,7 +28,7 @@ from scipy.spatial.distance import squareform
 BASE = Path(__file__).resolve().parent
 
 # ──────────────────────────────────────────────
-# 설정값 (코드 안에 숫자를 직접 쓰지 않는다)
+# settings (no numbers written directly in the code)
 # ──────────────────────────────────────────────
 CFG = {
     "CSV_PATH": BASE / "merged data" / "강우량_2009_2026.csv",
@@ -38,20 +38,20 @@ CFG = {
     "TRAIN_YEARS": list(range(2010, 2026)),
     "SEASON_MONTHS": [6, 7, 8, 9],
     "WET_HOUR_MM": 1.0,
-    "WET_HOUR_MM_STRICT": 10.0,          # 기준 민감도 검증용
+    "WET_HOUR_MM_STRICT": 10.0,          # for the threshold sensitivity check
     "MIN_OVERLAP_H": 500,
     "LINKAGE": "average",
     "K_LIST": [3, 4, 5, 6],
-    "ELBOW_K_RANGE": (1, 12),            # 팔꿈치 그림에서 볼 k 범위
+    "ELBOW_K_RANGE": (1, 12),            # range of k shown in the elbow chart
     "MIN_SEASON_COVERAGE": 0.9,
     "MAX_MISSING_H_24": 2,
     "WINDOW_H": 24,
-    "PERIODS": [(2010, 2017), (2018, 2026)],  # 기간 안정성 검증용
+    "PERIODS": [(2010, 2017), (2018, 2026)],  # for the period stability check
     "KNOWN_STORM": {"year": 2022, "stations": ["강남", "서초"]},
-    # 지도용 (없으면 지도만 건너뜀)
-    # 관측소 좌표 CSV: 열 = name, lat, lon  (name은 강우 CSV의 지점명과 같게)
+    # for the map (only the map is skipped if missing)
+    # station coordinates CSV: columns = name, lat, lon  (name matching the station names in the rainfall CSV)
     "STATION_COORDS": BASE / "data" / "station_coords.csv",
-    # 서울 구 경계 shp/geojson
+    # Seoul district borders, shp/geojson
     "SEOUL_GU_PATH": BASE / "data" / "seoul_gu.geojson",
     "CRS": "EPSG:5179",
 }
@@ -63,10 +63,10 @@ plt.rcParams["axes.unicode_minus"] = False
 
 
 # ──────────────────────────────────────────────
-# 1. 로드와 정리
+# 1. load and clean
 # ──────────────────────────────────────────────
 def load_hourly(csv_path, cfg):
-    """시간 × 관측소 표. 빠진 시간은 NaN."""
+    """Hour × station table. Missing hours are NaN."""
     df = pd.read_csv(csv_path, encoding="utf-8-sig")
     df.columns = ["stn", "name", "t", "rain"]
     df["t"] = pd.to_datetime(df["t"], format="%Y-%m-%d %H:%M")
@@ -74,7 +74,7 @@ def load_hourly(csv_path, cfg):
 
     hourly = df.pivot_table(index="t", columns="name", values="rain", aggfunc="first")
 
-    # 빈틈없는 시간축으로 맞춘다 (빠진 시간 = NaN, 0으로 채우지 않음)
+    # put it on a gap-free hourly axis (missing hours = NaN, not filled with 0)
     full_index = pd.date_range(hourly.index.min(), hourly.index.max(), freq="h")
     hourly = hourly.reindex(full_index)
     hourly.index.name = "t"
@@ -89,6 +89,7 @@ def load_hourly(csv_path, cfg):
 
 
 def save_table(df, path):
+    """Saves a table as parquet, or as gzipped CSV if pyarrow is missing."""
     try:
         df.to_parquet(path)
     except ImportError:
@@ -98,10 +99,10 @@ def save_table(df, path):
 
 
 # ──────────────────────────────────────────────
-# 2. 관측소 권역화
+# 2. station zonation
 # ──────────────────────────────────────────────
 def station_correlation(hourly, cfg, wet_mm=None):
-    """여름철 '비 온 시간'만으로 관측소 쌍 피어슨 상관."""
+    """Pearson correlation between station pairs, using only the summer hours with rain."""
     wet_mm = cfg["WET_HOUR_MM"] if wet_mm is None else wet_mm
     season = hourly[hourly.index.month.isin(cfg["SEASON_MONTHS"])]
     wet = season[(season >= wet_mm).any(axis=1)]
@@ -110,7 +111,7 @@ def station_correlation(hourly, cfg, wet_mm=None):
 
 
 def _relabel_by_leaf_order(labels, leaves):
-    """덴드로그램 왼쪽부터 권역 번호가 1, 2, 3... 이 되도록 바꾼다."""
+    """Renumbers the regions 1, 2, 3... from the left of the dendrogram."""
     order = []
     for i in leaves:
         if labels[i] not in order:
@@ -120,16 +121,16 @@ def _relabel_by_leaf_order(labels, leaves):
 
 
 def distance_matrix(corr):
-    """거리 = 1 − 상관 (정사각 행렬)."""
+    """Distance = 1 − correlation (square matrix)."""
     dist = 1.0 - corr.values
-    dist = np.where(np.isnan(dist), 1.0, dist)   # 상관을 못 구한 쌍은 무상관으로 취급
+    dist = np.where(np.isnan(dist), 1.0, dist)   # pairs without a correlation count as uncorrelated
     dist = (dist + dist.T) / 2
     np.fill_diagonal(dist, 0.0)
     return np.clip(dist, 0.0, None)
 
 
 def cluster_stations(corr, cfg):
-    """거리 = 1 − 상관, 계층적 군집. k별 권역 배정과 linkage 행렬을 돌려준다."""
+    """Hierarchical clustering on distance = 1 − correlation. Returns the linkage matrix and the region assignment for each k."""
     stations = list(corr.columns)
     dist = distance_matrix(corr)
 
@@ -144,10 +145,10 @@ def cluster_stations(corr, cfg):
 
 
 # ──────────────────────────────────────────────
-# 3. 관측소 × 연도 요약
+# 3. station × year summary
 # ──────────────────────────────────────────────
 def station_year_summary(hourly, cfg):
-    """관측소-연도마다 연 최대 1시간 / 24시간 강우, 여름 관측 비율."""
+    """Annual maximum 1-hour / 24-hour rainfall and summer data coverage for every station and year."""
     win = cfg["WINDOW_H"]
     roll24 = hourly.rolling(win, min_periods=win - cfg["MAX_MISSING_H_24"]).sum()
 
@@ -177,10 +178,10 @@ def station_year_summary(hourly, cfg):
 
 
 # ──────────────────────────────────────────────
-# 4. 권역 × 연도 집계
+# 4. region × year features
 # ──────────────────────────────────────────────
 def region_year_features(summary, assignment, k):
-    """관측소 피처를 먼저 구하고, 권역 평균·최대는 마지막에 낸다."""
+    """Station features come first; the regional mean and maximum are taken last."""
     reg = assignment[f"k{k}"].rename("region")
     df = summary.merge(reg, left_on="name", right_index=True)
 
@@ -197,7 +198,7 @@ def region_year_features(summary, assignment, k):
     ).reset_index()
     long["train"] = long["year"].isin(CFG["TRAIN_YEARS"])
 
-    # 침수 모델 입력용: 연도 1행, 권역 수 × 2개 열
+    # input for the flood model: one row per year, 2 columns per region
     wide = long.pivot(index="year", columns="region", values=["max_1h_mean", "max_24h_mean"])
     wide.columns = [f"R{r}_{'max1h' if c == 'max_1h_mean' else 'max24h'}" for c, r in wide.columns]
     wide = wide[sorted(wide.columns, key=lambda c: (int(c.split("_")[0][1:]), c))]
@@ -205,9 +206,10 @@ def region_year_features(summary, assignment, k):
 
 
 # ──────────────────────────────────────────────
-# 5. 검증
+# 5. validation
 # ──────────────────────────────────────────────
 def adjusted_rand_index(a, b):
+    """Adjusted Rand index between two labelings (1 = identical clusterings)."""
     ct = pd.crosstab(np.asarray(a), np.asarray(b)).values.astype(float)
     c2 = lambda x: x * (x - 1) / 2
     sum_ij = c2(ct).sum()
@@ -219,15 +221,17 @@ def adjusted_rand_index(a, b):
 
 
 def _upper(values):
+    """Values above the diagonal of a square matrix."""
     return values[np.triu_indices_from(values, k=1)]
 
 
 def validate(hourly, corr, assignment, summary, region_tables, cfg, report_dir):
+    """Runs the validation checks (cohesion, stability, sensitivity, border stations, known storm, missing data) and writes validation.txt."""
     lines = []
     global_median = np.nanmedian(_upper(corr.values))
     lines.append(f"전체 관측소 쌍 상관 중앙값: {global_median:.3f}\n")
 
-    # 권역 내 응집도
+    # cohesion within regions
     rows = []
     for k in cfg["K_LIST"]:
         for r, members in assignment.groupby(f"k{k}").groups.items():
@@ -243,7 +247,7 @@ def validate(hourly, corr, assignment, summary, region_tables, cfg, report_dir):
         lines.append(f"  k={k}: {'통과' if g['pass'].all() else '실패'}  "
                      f"(내부 상관 {g['within_corr'].min():.3f} ~ {g['within_corr'].max():.3f})")
 
-    # 기간 안정성
+    # period stability
     lines.append("\n[기간 안정성] ARI (앞 기간 vs 뒤 기간)")
     period_assign = []
     for y0, y1 in cfg["PERIODS"]:
@@ -254,14 +258,14 @@ def validate(hourly, corr, assignment, summary, region_tables, cfg, report_dir):
         a, b = period_assign[0][f"k{k}"], period_assign[1][f"k{k}"].reindex(period_assign[0].index)
         lines.append(f"  k={k}: ARI = {adjusted_rand_index(a, b):.3f}")
 
-    # 기준 민감도
+    # threshold sensitivity
     lines.append(f"\n[기준 민감도] ARI ({cfg['WET_HOUR_MM']}mm 기준 vs {cfg['WET_HOUR_MM_STRICT']}mm 기준)")
     _, strict = cluster_stations(station_correlation(hourly, cfg, cfg["WET_HOUR_MM_STRICT"]), cfg)
     for k in cfg["K_LIST"]:
         lines.append(f"  k={k}: ARI = {adjusted_rand_index(assignment[f'k{k}'], strict[f'k{k}']):.3f}")
 
-    # 경계 관측소: 자기 권역보다 다른 권역과 평균 상관이 더 높은 관측소
-    # (계층적 군집은 k를 늘리면 쪼개지기만 하므로, '옮겨 가는' 관측소 대신 이 기준으로 기록)
+    # border stations: stations whose mean correlation with another region is higher than with their own
+    # (hierarchical clusters only split as k grows, so this is recorded instead of stations that 'move')
     lines.append("\n[경계 관측소] 다른 권역과의 평균 상관이 자기 권역보다 높은 관측소")
     for k in cfg["K_LIST"]:
         lab = assignment[f"k{k}"]
@@ -275,7 +279,7 @@ def validate(hourly, corr, assignment, summary, region_tables, cfg, report_dir):
                 flagged.append(f"{s}(R{lab[s]}→R{best_r})")
         lines.append(f"  k={k}: {', '.join(flagged) if flagged else '없음'}")
 
-    # 알려진 폭우
+    # known storm
     ks = cfg["KNOWN_STORM"]
     lines.append(f"\n[알려진 폭우] {ks['year']}년, {'·'.join(ks['stations'])} 권역의 연 최대 1시간 강우 순위")
     for k in cfg["K_LIST"]:
@@ -287,7 +291,7 @@ def validate(hourly, corr, assignment, summary, region_tables, cfg, report_dir):
         lines.append(f"  k={k}: 대상 권역 {sorted(f'R{t}' for t in targets)}, 1위 R{top} "
                      f"→ {'통과' if top in targets else '실패'}")
 
-    # 결측 처리
+    # missing data handling
     lines.append("\n[결측 처리]")
     leaked = summary[~summary["usable"] & summary[["max_1h", "max_24h"]].notna().any(axis=1)]
     lines.append(f"  관측 비율 미달인데 값이 들어간 관측소-연도: {len(leaked)}건 (0이어야 함)")
@@ -306,10 +310,10 @@ def validate(hourly, corr, assignment, summary, region_tables, cfg, report_dir):
 
 
 # ──────────────────────────────────────────────
-# 6. 시각화
+# 6. charts
 # ──────────────────────────────────────────────
 def _cut_height(Z, k):
-    """k개 권역이 되도록 자르는 높이 (두 병합 높이의 가운데)."""
+    """Height at which to cut for k regions (halfway between two merge heights)."""
     n = Z.shape[0] + 1
     lo = Z[n - k - 1, 2]
     hi = Z[n - k, 2]
@@ -317,21 +321,21 @@ def _cut_height(Z, k):
 
 
 def _find_elbow(ks, values):
-    """양 끝을 잇는 직선에서 가장 멀리 떨어진 점 = 팔꿈치."""
+    """The elbow = the point farthest from the straight line joining both ends."""
     x = (ks - ks[0]) / (ks[-1] - ks[0])
     y = (values - values[-1]) / (values[0] - values[-1])
-    gap = (1 - x) - y   # 직선 y = 1 − x 아래로 내려간 정도
+    gap = (1 - x) - y   # how far below the line y = 1 − x
     return int(ks[np.argmax(gap)])
 
 
 def plot_elbow(Z, corr, cfg, report_dir):
-    """k별 권역 내 거리 제곱합(W)과 병합 높이로 팔꿈치를 찾는다."""
+    """Finds the elbow from the within-region sum of squared distances (W) and the merge heights for each k, and charts both."""
     dist = distance_matrix(corr)
     n = dist.shape[0]
     k_lo, k_hi = cfg["ELBOW_K_RANGE"]
     ks = np.arange(k_lo, min(k_hi, n) + 1)
 
-    # W(k) = Σ_권역 (1 / 2n_c) Σ_{i,j∈c} d_ij²  (k-means의 SSE와 같은 정의)
+    # W(k) = Σ_regions (1 / 2n_c) Σ_{i,j∈c} d_ij²  (same definition as the k-means SSE)
     wss = []
     for k in ks:
         labels = fcluster(Z, t=k, criterion="maxclust")
@@ -342,7 +346,7 @@ def plot_elbow(Z, corr, cfg, report_dir):
         wss.append(w)
     wss = np.array(wss)
 
-    # k개 → k−1개로 합칠 때의 병합 높이 (클수록 억지로 합친 것)
+    # merge height when going from k to k−1 regions (larger = a forced merge)
     heights = np.array([Z[n - k, 2] if k >= 2 else np.nan for k in ks])
 
     elbow_k = _find_elbow(ks, wss)
@@ -380,6 +384,7 @@ def plot_elbow(Z, corr, cfg, report_dir):
 
 
 def plot_dendrogram(Z, corr, cfg, report_dir):
+    """Draws the station dendrogram with the cut height for each k."""
     fig, ax = plt.subplots(figsize=(13, 6))
     dendrogram(Z, labels=list(corr.columns), ax=ax, leaf_rotation=90,
                color_threshold=0, above_threshold_color="#555555")
@@ -396,6 +401,7 @@ def plot_dendrogram(Z, corr, cfg, report_dir):
 
 
 def plot_sorted_heatmap(Z, corr, assignment, cfg, report_dir):
+    """Draws the station correlation matrix in dendrogram order, with the regions outlined, for each k."""
     leaves = dendrogram(Z, no_plot=True)["leaves"]
     order = [corr.columns[i] for i in leaves]
     mat = corr.loc[order, order].values
@@ -421,6 +427,7 @@ def plot_sorted_heatmap(Z, corr, assignment, cfg, report_dir):
 
 
 def plot_region_map(assignment, cfg, report_dir):
+    """Draws a map of the regions as Voronoi cells around the stations, clipped to Seoul."""
     coords_path, gu_path = cfg["STATION_COORDS"], cfg["SEOUL_GU_PATH"]
     if not coords_path.exists():
         print(f"[map] 관측소 좌표 파일이 없어 지도를 건너뜀: {coords_path}")
@@ -478,6 +485,7 @@ def plot_region_map(assignment, cfg, report_dir):
 
 
 def plot_sankey(assignment, cfg, report_dir):
+    """Draws a Sankey diagram of how the regions split as k grows."""
     try:
         import plotly.graph_objects as go
     except ImportError:
@@ -511,6 +519,7 @@ def plot_sankey(assignment, cfg, report_dir):
 
 
 def plot_region_year(region_tables, cfg, report_dir):
+    """Draws heat maps of the regional annual maximum rainfall per year for each k."""
     for k in cfg["K_LIST"]:
         long = region_tables[k][0]
         fig, axes = plt.subplots(2, 1, figsize=(14, 2.2 + 1.1 * k * 2), sharex=True)
@@ -542,6 +551,7 @@ def plot_region_year(region_tables, cfg, report_dir):
 
 
 def plot_regions(Z, corr, assignment, region_tables, cfg, report_dir):
+    """Draws all charts."""
     plot_elbow(Z, corr, cfg, report_dir)
     plot_region_map(assignment, cfg, report_dir)
     plot_dendrogram(Z, corr, cfg, report_dir)
@@ -552,9 +562,10 @@ def plot_regions(Z, corr, assignment, region_tables, cfg, report_dir):
 
 
 # ──────────────────────────────────────────────
-# 실행
+# main
 # ──────────────────────────────────────────────
 def main(cfg=CFG):
+    """Loads the rainfall data, zones the stations, builds the region × year features, validates them and draws the charts."""
     out_dir = cfg["OUT_DIR"]
     report_dir = out_dir / "report"
     report_dir.mkdir(parents=True, exist_ok=True)

@@ -1,8 +1,8 @@
-// 시나리오 침수 확률. P_{s,g} = σ(α_{s,c} + β_{s,c} · z + log q_g), z = (PC − pc_mean) / pc_std
+// Scenario flood probability. P_{s,g} = σ(α_{s,c} + β_{s,c} · z + log q_g), z = (PC − pc_mean) / pc_std
 
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 
-// 사후 표본 × 클러스터의 η (S × C, 행 우선 평탄화)
+// η for every posterior sample × cluster (S × C, flattened row-major).
 export function scenarioEta(model, pc) {
   const K = model.pcs.length;
   const z = model.pc_mean.map((m, k) => (pc[k] - m) / model.pc_std[k]);
@@ -18,7 +18,7 @@ export function scenarioEta(model, pc) {
   return { eta, S, C };
 }
 
-// 격자별 표본 평균 확률
+// Mean probability over the samples for every grid cell.
 export function gridMeans({ eta, S, C }, cluster, logQ) {
   const n = cluster.length;
   const mean = new Float32Array(n);
@@ -31,13 +31,14 @@ export function gridMeans({ eta, S, C }, cluster, logQ) {
   return mean;
 }
 
+// Returns the q-quantile of a sorted array with linear interpolation.
 function quantile(sorted, q) {
   const pos = (sorted.length - 1) * q;
   const lo = Math.floor(pos), hi = Math.ceil(pos);
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
 }
 
-// 한 격자의 평균과 5–95% 분위수 (numpy quantile 기본값과 같은 선형 보간)
+// Mean and 5–95% quantiles for one grid cell (linear interpolation, same as numpy.quantile's default).
 export function gridSummary({ eta, S, C }, c, lq) {
   const p = new Float64Array(S);
   for (let s = 0; s < S; s++) p[s] = sigmoid(eta[s * C + c] + lq);
@@ -46,6 +47,7 @@ export function gridSummary({ eta, S, C }, c, lq) {
   return { mean, q05: quantile(p, 0.05), q95: quantile(p, 0.95) };
 }
 
+// Calculates the scenario's η and every grid cell's mean flood probability for the slider values pc.
 export function compute(model, grids, pc) {
   const eta = scenarioEta(model, pc);
   return { pc: [...pc], eta, mean: gridMeans(eta, grids.cluster, grids.log_q) };

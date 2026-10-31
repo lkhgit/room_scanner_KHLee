@@ -1,4 +1,4 @@
-// 왼쪽 조작 패널(슬라이더·프리셋·검색)과 오른쪽 격자 상세 패널
+// Left control panel (sliders, presets, search) and right grid cell detail panel
 
 import * as store from "./state.js";
 import { gridSummary } from "./model.js";
@@ -11,7 +11,7 @@ const SLIDERS = [
   { left: "장마형", right: "집중호우형" },
 ];
 
-// β 부호별로 "이 지역이 민감한 비"를 말로 옮긴 표현 (PC1–PC3)
+// Wording of "the rain this area is sensitive to" for each sign of β (PC1–PC3)
 const SENSITIVITY = [
   { pos: "서울 전체에 비가 많을 때", neg: "서울 전체에 비가 적을 때" },
   { pos: "북쪽에 비가 몰릴 때", neg: "남쪽에 비가 몰릴 때" },
@@ -21,9 +21,12 @@ const SENSITIVITY = [
 let D;  // {grids, model, years, clusters, meta}
 let livingYears = 2;
 
+// Returns the element with the given id.
 const $ = (id) => document.getElementById(id);
+// Escapes text for safe use inside HTML.
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// Formats a probability as a percentage, with "under 0.1%" and "over 99%" at the ends.
 export function fmtPct(p) {
   const v = p * 100;
   if (v < 0.1) return "0.1% 미만";
@@ -31,8 +34,9 @@ export function fmtPct(p) {
   return v < 10 ? `${v.toFixed(1)}%` : `${Math.round(v)}%`;
 }
 
-// ---------------------------------------------------------------- 조작 패널
+// ---------------------------------------------------------------- control panel
 
+// Builds the presets, sliders and search box, and wires them to the handlers.
 export function initControls(data, on) {
   D = data;
   const { meta } = D;
@@ -75,6 +79,7 @@ export function initControls(data, on) {
   });
 }
 
+// Updates the sliders, presets, unusual-pattern warning and calculation status.
 export function renderControls(st) {
   const { meta, years } = D;
   st.pc.forEach((v, k) => {
@@ -96,17 +101,20 @@ export function renderControls(st) {
     stale ? "슬라이더가 바뀌었습니다. 다시 계산하면 지도가 갱신됩니다." : "현재 슬라이더로 계산한 결과입니다.";
 }
 
+// Shows a message under the search box.
 export function setSearchMsg(msg) {
   $("search-msg").textContent = msg || "";
 }
 
+// Lists search results to choose from.
 export function showResults(results) {
   $("search-results").innerHTML = results.map((r, i) =>
     `<li data-i="${i}"><b>${esc(r.label)}</b>${r.sub ? `<span>${esc(r.sub)}</span>` : ""}</li>`).join("");
 }
 
-// ---------------------------------------------------------------- 상세 패널
+// ---------------------------------------------------------------- detail panel
 
+// Returns the HTML for a cell's flood probability in the current scenario, with its change since the last run.
 function scenarioBlock(st, g) {
   const { grids } = D;
   if (!st.result) {
@@ -124,6 +132,7 @@ function scenarioBlock(st, g) {
     ${store.isStale() ? `<p class="note stale">이전 강우 기준입니다. 슬라이더가 바뀌었으니 다시 계산하세요.</p>` : ""}`;
 }
 
+// Describes which rain patterns raise this cluster's risk, from the β values whose 90% interval excludes 0.
 function sensitivityText(c) {
   const cl = D.clusters[c];
   const sig = cl.beta_mean
@@ -134,6 +143,7 @@ function sensitivityText(c) {
   return sig.map((b) => b.m > 0 ? SENSITIVITY[b.k].pos : SENSITIVITY[b.k].neg).join(", ") + " 위험이 커집니다.";
 }
 
+// Finds the highest flood probability among the 8 neighbouring cells.
 function neighborMax(st, g) {
   if (!st.result) return null;
   const { grids } = D;
@@ -148,6 +158,7 @@ function neighborMax(st, g) {
   return best;
 }
 
+// Returns the detail panel HTML for a cell with flood history.
 function floodedDetail(st, place, g) {
   const { grids, meta, clusters } = D;
   const years = grids.years[g];
@@ -180,6 +191,7 @@ function floodedDetail(st, place, g) {
       연간 확률 90% 구간 폭 ${width.toFixed(1)}%p</p></section>`;
 }
 
+// Returns the detail panel HTML for a cell without flood history, pointing to the nearest cell that has some.
 function emptyDetail(st, place) {
   const { grids, meta } = D;
   const near = nearestFlooded(place.ix, place.iy);
@@ -196,6 +208,7 @@ function emptyDetail(st, place) {
       <p>${nearText}</p></section>`;
 }
 
+// Returns the footer that explains what the data can and cannot tell.
 function footer() {
   const s = D.meta.unpredictable_share;
   return `<footer class="notice">
@@ -205,6 +218,7 @@ function footer() {
     <p>확률은 예보가 아니라 “이런 비가 온다면”의 추정치입니다.</p></footer>`;
 }
 
+// Shows or hides the detail panel for the selected place.
 export function renderDetail(st) {
   const panel = $("detail");
   const place = st.place;

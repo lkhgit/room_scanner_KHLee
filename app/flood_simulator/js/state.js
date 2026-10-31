@@ -1,18 +1,20 @@
-// 앱 상태와 변경 알림. 화면 모듈은 subscribe로 필요한 키만 듣는다.
+// App state and change notifications. View modules use subscribe() to listen only to the keys they need.
 const state = {
-  pc: [0, 0, 0],         // 현재 슬라이더 값 PC1–PC3
-  result: null,          // 마지막 계산 {pc, eta, mean}
-  prevResult: null,      // 직전 계산 (변화량 비교용)
-  place: null,           // 선택 장소 {label, lat, lng, ix, iy, idx}
-  mode: "rain",          // 지도 종류 "rain" | "flood"
+  pc: [0, 0, 0],         // current slider values PC1–PC3
+  result: null,          // last calculation {pc, eta, mean}
+  prevResult: null,      // calculation before that (to compare changes)
+  place: null,           // selected place {label, lat, lng, ix, iy, idx}
+  mode: "rain",          // map type "rain" | "flood"
 };
 
 const listeners = [];
 
+// Returns the app state.
 export function get() {
   return state;
 }
 
+// Updates the state and calls the listeners of the keys that changed.
 export function set(patch) {
   Object.assign(state, patch);
   const keys = Object.keys(patch);
@@ -21,11 +23,12 @@ export function set(patch) {
   }
 }
 
+// Calls fn whenever one of the given keys changes.
 export function subscribe(keys, fn) {
   for (const key of keys) listeners.push({ key, fn });
 }
 
-// 마지막 계산 이후 슬라이더가 바뀌었는지
+// Tells whether the sliders changed since the last calculation.
 export function isStale() {
   const r = state.result;
   if (!r) return true;

@@ -1,20 +1,20 @@
 """
-강우 지도에 필요한 관측소 좌표와 서울 구 경계를 내려받아 flood_risk_ML/data/에 저장한다.
-Rainfall clustering.py의 STATION_COORDS, SEOUL_GU_PATH와 같은 경로·형식이다.
+Downloads the station coordinates and Seoul district borders the rain map needs, into flood_risk_ML/data/.
+Same paths and formats as STATION_COORDS and SEOUL_GU_PATH in Rainfall clustering.py.
 
-출처
-  관측소 좌표: 기상청 국가기후데이터센터 AWS 관측지점정보 (2026-10-22 기준 유효 이력)
+Sources
+  Station coordinates: KMA National Climate Data Center, AWS station information (records valid on 2026-10-22)
               https://data.kma.go.kr/tmeta/stn/selectStnList.do?pgmNo=123
-              정리본: https://github.com/gud1396-coder/weather-station-explorer (data/aws.json)
-  서울 구 경계: 통계청 2013 행정구역 (southkorea/seoul-maps, kostat/2013 simple)
+              cleaned copy: https://github.com/gud1396-coder/weather-station-explorer (data/aws.json)
+  Seoul district borders: Statistics Korea 2013 administrative areas (southkorea/seoul-maps, kostat/2013 simple)
               https://github.com/southkorea/seoul-maps
 
-출력 (flood_risk_ML/data/)
-  station_coords.csv   name, stn, lat, lon  (name = region_assignment.csv의 지점명)
-  seoul_gu.geojson     서울 25개 구 폴리곤 (WGS84)
+Output (flood_risk_ML/data/)
+  station_coords.csv   name, stn, lat, lon  (name = station name in region_assignment.csv)
+  seoul_gu.geojson     polygons of Seoul's 25 districts (WGS84)
 
-실행:
-    py "app\\flood_simulator\\tools\\fetch_geo.py"     (저장소 최상위 폴더에서)
+Run:
+    py "app\\flood_simulator\\tools\\fetch_geo.py"     (from the repository root)
 """
 import csv
 import json
@@ -32,11 +32,13 @@ GU_URL = ("https://raw.githubusercontent.com/southkorea/seoul-maps/master/"
 
 
 def fetch_json(url):
+    """Downloads and parses a JSON file."""
     with urllib.request.urlopen(url, timeout=30) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
 def main():
+    """Writes station_coords.csv for the stations in region_assignment.csv and saves the Seoul district GeoJSON."""
     os.makedirs(OUT_DIR, exist_ok=True)
     aws = {s["id"]: s for s in fetch_json(AWS_URL)}
     with open(ASSIGN_PATH, encoding="utf-8-sig") as f:

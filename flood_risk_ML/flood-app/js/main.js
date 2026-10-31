@@ -1,4 +1,4 @@
-// 데이터 로드와 모듈 연결. 상황별 동작(계획 문서의 표)은 여기서 정한다.
+// Loads the data and wires the modules together. What happens in each situation (the table in the plan) is decided here.
 
 import * as store from "./state.js";
 import * as rain from "./rain.js";
@@ -7,6 +7,7 @@ import * as mapView from "./map.js";
 import * as search from "./search.js";
 import * as panel from "./panel.js";
 
+// Fetches one JSON file from the data folder.
 async function loadJson(name) {
   const res = await fetch(`data/${name}`);
   if (!res.ok) throw new Error(`${name}을 불러오지 못했습니다 (${res.status})`);
@@ -16,6 +17,7 @@ async function loadJson(name) {
 let D;
 let searchResults = [];
 
+// Calculates flood probabilities for the current slider values and switches the map to flood mode.
 function calculate() {
   const st = store.get();
   const t = performance.now();
@@ -24,20 +26,24 @@ function calculate() {
   store.set({ prevResult: st.result, result, mode: "flood" });
 }
 
+// Selects a place and finds the grid cell it falls in.
 function selectPlace(label, lat, lng) {
   const cell = search.locate(lat, lng);
   store.set({ place: { label, lat, lng, ...cell } });
 }
 
 const handlers = {
+  // Shows the rain map for new slider values.
   onPc(pc) {
     store.set({ pc, mode: "rain" });
   },
   onCalc: calculate,
+  // Switches between the rain and flood maps, calculating first if needed.
   onMode(mode) {
     if (mode === "flood" && !store.get().result) calculate();
     else store.set({ mode });
   },
+  // Searches for a place and selects it, or lists the results to choose from.
   async onSearch(query) {
     panel.setSearchMsg("검색 중…");
     panel.showResults([]);
@@ -52,6 +58,7 @@ const handlers = {
     panel.setSearchMsg(`${searchResults.length}개 결과 중 하나를 고르세요.`);
     panel.showResults(searchResults);
   },
+  // Selects one search result and flies the map to it.
   onPick(i) {
     const r = searchResults[i];
     panel.showResults([]);
@@ -61,14 +68,17 @@ const handlers = {
     selectPlace(r.label, r.lat, r.lng);
     mapView.flyTo(r.lat, r.lng);
   },
+  // Selects the point clicked on the map.
   onClick(lat, lng) {
     selectPlace("지도에서 고른 위치", lat, lng);
   },
+  // Clears the selected place.
   onClear() {
     store.set({ place: null });
   },
 };
 
+// Loads all data, sets up the map and panels, and shows the first rain map.
 async function main() {
   const [grids, mdl, pca, years, clusters, meta, seoul] = await Promise.all([
     loadJson("grids.json"), loadJson("model.json"), loadJson("pca.json"),
@@ -97,7 +107,7 @@ async function main() {
     setTimeout(mapView.invalidate, 0);
   });
 
-  // 처음 접속: 평년 프리셋의 강우 지도, 상세 패널 닫힘
+  // First visit: rain map of the normal-year preset, detail panel closed
   store.set({ pc: [...meta.presets[0].pc], mode: "rain" });
   document.getElementById("loading").remove();
 }

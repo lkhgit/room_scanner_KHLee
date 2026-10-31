@@ -1,33 +1,33 @@
 """
-침수 확률 지도 앱(flood-app)이 읽을 JSON을 분석 결과 파일에서 만든다.
+Builds the JSON files the flood probability map app (flood-app) reads, from the analysis result files.
 
-입력 (침수 위험/)
-  Grid-level prediction results/grid_flood_risk.csv     격자별 q_g, 연간·2년·4년 확률
-  Grid-level prediction results/scenario_params.json    사후 표본 α, β와 PC 표준화 값
-  Grid clustering results/grid_clusters.csv  격자별 침수 연도 조합, 클러스터 배정 방식
+Input (flood_risk_ML/)
+  Grid-level prediction results/grid_flood_risk.csv     q_g and annual / 2-year / 4-year probability per grid cell
+  Grid-level prediction results/scenario_params.json    posterior samples of α, β and the PC standardisation
+  Grid clustering results/grid_clusters.csv  flood-year combination and cluster assignment method per cell
   Grid clustering results/cluster_summary.csv
   Rainfall zonation results/region_year_features_k5.csv, region_assignment.csv
   Prediction model results/cv_results.csv
-  data/station_coords.csv, data/seoul_gu.geojson   (fetch_geo.py로 내려받음)
+  data/station_coords.csv, data/seoul_gu.geojson   (downloaded by fetch_geo.py)
 
-출력 (flood-app/data/)
-  grids.json     격자 13,054개 (열 단위 배열), 네 꼭짓점 위경도 포함
+Output (flood-app/data/)
+  grids.json     13,054 grid cells (column arrays), including the latitude/longitude of the four corners
   model.json     pc_mean, pc_std, α (S, C), β (S, C, K)
-  pca.json       슬라이더 → 권역 강우 복원용 PCA 파라미터 (PC1–PC3만)
-  years.json     연도별 PC1–PC3, 권역별 최대 1h·24h 강우, 침수 데이터 유무
-  clusters.json  클러스터별 크기, 대표 연도 조합, β 요약
-  meta.json      슬라이더 범위, 프리셋, 패턴 신뢰도 기준, 안내 문구 수치, 관측소 좌표·권역
-  seoul.geojson  서울 25개 구 경계 (강우 지도 마스크와 경계선)
+  pca.json       PCA parameters to rebuild regional rainfall from the sliders (PC1–PC3 only)
+  years.json     PC1–PC3 per year, max 1h / 24h rainfall per region, whether flood data exists
+  clusters.json  size, typical year combinations and β summary per cluster
+  meta.json      slider ranges, presets, pattern check threshold, numbers used in the notes, station coordinates and regions
+  seoul.geojson  borders of Seoul's 25 districts (rain map mask and outlines)
 
-슬라이더는 PC1–PC3만 쓴다. PC4는 침수 모델 입력이 아니고, 강우 복원에서도 0으로 둔다.
+The sliders use PC1–PC3 only. PC4 is not an input of the flood model and is set to 0 when rebuilding rainfall.
 
-검산
-  1. model.json으로 연간 확률을 다시 계산해 grid_flood_risk.csv의 p_annual과 비교
-  2. years.json의 PC를 'rainfall data final ver.csv'와 비교
-  3. 격자 중심 → WGS84 → EPSG:5179 왕복 후 격자 찾기 식이 자기 ix, iy를 돌려주는지
+Checks
+  1. Recompute the annual probability from model.json and compare with p_annual in grid_flood_risk.csv
+  2. Compare the PCs in years.json with 'rainfall data final ver.csv'
+  3. Check that the grid lookup returns each cell's own ix, iy after a cell centre -> WGS84 -> EPSG:5179 round trip
 
-실행:
-    & "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" "flood-app\\tools\\build_app_data.py"
+Run:
+    py "flood-app\\tools\\build_app_data.py"     (from flood_risk_ML)
 """
 import json
 import os
@@ -52,7 +52,7 @@ CV_PATH = os.path.join(BASE_DIR, "Prediction model results", "cv_results.csv")
 STATION_PATH = os.path.join(BASE_DIR, "data", "station_coords.csv")
 SEOUL_GU_PATH = os.path.join(BASE_DIR, "data", "seoul_gu.geojson")
 
-# '강우량 차원 축소 방법.txt'의 값 그대로
+# values exactly as in '강우량 차원 축소 방법.txt' (the PCA settings file)
 FEATURES = ["R1_max1h", "R1_max24h", "R2_max1h", "R2_max24h", "R3_max1h",
             "R3_max24h", "R4_max1h", "R4_max24h", "R5_max1h", "R5_max24h"]
 PCA_MEAN = [42.5220588235, 163.6176470588, 42.4068627451, 162.4191176471, 44.4740896359,
@@ -70,11 +70,11 @@ PCA_COMPONENTS = [
      -0.2475389278, 0.5738544876, 0.3762822943, -0.1515348615, 0.1579681287],
 ]
 
-N_PCS = 3  # 슬라이더로 쓰는 주성분 수 (PC4 제외)
+N_PCS = 3  # number of principal components used as sliders (PC4 left out)
 NO_DATA_YEARS = [2015, 2021]
 TRAIN_YEARS = [y for y in range(2010, 2026) if y not in NO_DATA_YEARS]
 PRESET_YEARS = [2010, 2011, 2022, 2025]
-GRID_ORIGIN = (935550.0, 1937350.0)  # ix = 0, iy = 0 격자 중심 (EPSG:5179)
+GRID_ORIGIN = (935550.0, 1937350.0)  # centre of grid cell ix = 0, iy = 0 (EPSG:5179)
 CELL = 100.0
 MODEL_DECIMALS = 4
 
@@ -83,20 +83,22 @@ to_5179 = Transformer.from_crs("EPSG:4326", "EPSG:5179", always_xy=True)
 
 
 def round_list(a, d):
+    """Rounds an array to d decimals and returns it as a list."""
     return np.round(np.asarray(a, dtype=float), d).tolist()
 
 
 def write_json(name, obj):
+    """Writes one compact JSON file to the output folder and prints its size."""
     path = os.path.join(OUT_DIR, name)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
     print(f"  {name:<14} {os.path.getsize(path) / 1024:8.0f} KB")
 
 
-# ---------------------------------------------------------------- 파일별 생성
+# ---------------------------------------------------------------- one builder per output file
 
 def build_grids(risk, clusters):
-    """격자 표를 열 단위 배열로. 꼭짓점은 [서남, 동남, 동북, 서북] 순서의 [lat, lon]."""
+    """Turns the grid table into column arrays. Corners are [lat, lon] in the order [SW, SE, NE, NW]."""
     g = risk.join(clusters[["combo", "assign", "attach_dist_m"]], on="cell_id", how="left")
     if g["combo"].isna().any():
         raise SystemExit("grid_clusters.csv에 없는 격자가 grid_flood_risk.csv에 있습니다.")
@@ -105,7 +107,7 @@ def build_grids(risk, clusters):
     for dx, dy in [(-50, -50), (50, -50), (50, 50), (-50, 50)]:
         lon, lat = to_wgs.transform(g["x"].values + dx, g["y"].values + dy)
         corners.append(np.stack([lat, lon], axis=1))
-    corners = np.round(np.stack(corners, axis=1), 6)  # (격자, 4, 2)
+    corners = np.round(np.stack(corners, axis=1), 6)  # (cell, 4, 2)
 
     prob_cols = [c for c in risk.columns if c.startswith("p_")]
     out = {
@@ -126,6 +128,7 @@ def build_grids(risk, clusters):
 
 
 def build_model(params):
+    """Keeps the model parameters the app needs, with α and β rounded."""
     return {
         "description": params["description"],
         "pcs": params["pcs"],
@@ -137,11 +140,13 @@ def build_model(params):
 
 
 def project_pcs(features):
+    """Projects yearly regional rainfall features onto the principal components."""
     z = (features[FEATURES].values - np.array(PCA_MEAN)) / np.array(PCA_STD)
     return z @ np.array(PCA_COMPONENTS).T
 
 
 def build_years(region_features):
+    """Builds the per-year PCs and regional max rainfall, and returns the PC table for the checks."""
     wide = region_features.pivot(index="year", columns="region",
                                  values=["max_1h_mean", "max_24h_mean"])
     feats = pd.DataFrame(index=wide.index)
@@ -163,7 +168,7 @@ def build_years(region_features):
 
 
 def build_clusters(summary, beta, pcs):
-    """β 사후 표본의 평균과 5–95% 분위수. 구간이 0을 포함하지 않으면 그 축에 '민감'하다고 본다."""
+    """Mean and 5–95% quantiles of the β posterior samples. A cluster counts as 'sensitive' to an axis if that interval excludes 0."""
     rows = []
     for _, r in summary.iterrows():
         c = int(r["cluster"])
@@ -181,8 +186,8 @@ def build_clusters(summary, beta, pcs):
 
 
 def build_meta(pc_table, pc_mean, cv, assignment, stations):
-    """슬라이더 범위·프리셋·패턴 신뢰도 기준·권역과 관측소 좌표.
-    패턴 거리는 PC1–PC3을 연도 간 표준편차로 나눈 공간에서 잰다."""
+    """Slider ranges, presets, the pattern check threshold, regions and station coordinates.
+    Pattern distances are measured on PC1–PC3 divided by their standard deviation across years."""
     pc_scale = pc_table.std(ddof=0).values
     zs = pc_table.values / pc_scale
     d = np.linalg.norm(zs[:, None, :] - zs[None, :, :], axis=2)
@@ -212,9 +217,10 @@ def build_meta(pc_table, pc_mean, cv, assignment, stations):
     }
 
 
-# ---------------------------------------------------------------- 검산
+# ---------------------------------------------------------------- checks
 
 def check_annual(model, grids, years, risk):
+    """Recomputes the annual flood probability from model.json; returns the largest difference from p_annual."""
     alpha, beta = np.array(model["alpha"]), np.array(model["beta"])
     labels, log_q = np.array(grids["cluster"]), np.array(grids["log_q"])
     pc = np.array([y["pc"][:len(model["pcs"])] for y in years if y["year"] in TRAIN_YEARS])
@@ -228,6 +234,7 @@ def check_annual(model, grids, years, risk):
 
 
 def check_grid_lookup(risk):
+    """Counts grid cells that the WGS84 round trip maps to a different ix, iy."""
     lon, lat = to_wgs.transform(risk["x"].values, risk["y"].values)
     X, Y = to_5179.transform(lon, lat)
     ix = np.round((X - GRID_ORIGIN[0]) / CELL).astype(int)
@@ -236,6 +243,7 @@ def check_grid_lookup(risk):
 
 
 def main():
+    """Loads the inputs, writes every app data file, and runs the three checks."""
     os.makedirs(OUT_DIR, exist_ok=True)
 
     print("[1/3] 입력 로드")

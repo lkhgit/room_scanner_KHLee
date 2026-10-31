@@ -1,8 +1,8 @@
 """
-서울시 침수흔적도(연도별 shapefile)를 읽어 100m 격자 단위 침수 빈도/침수심을 계산하고
-data/flood_grid.geojson 캐시 파일로 저장하는 전처리 스크립트.
+Preprocessing script that reads the Seoul flood trace maps (one shapefile per year), computes the flood frequency
+and depth on a 100 m grid and saves them as the cache file data/flood_grid.geojson.
 
-실행:
+Run:
     "C:\\Users\\KHLee\\AppData\\Local\\Python\\bin\\python.exe" build_grid.py
 """
 import glob
@@ -18,12 +18,12 @@ from shapely.geometry import box
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(BASE_DIR, "flood map")
 OUT_PATH = os.path.join(BASE_DIR, "data", "flood_grid.geojson")
-SOURCE_CRS = "EPSG:5179"  # 중부원점 TM, 원본 shapefile 좌표계
-CELL_SIZE_M = 100  # 격자 한 변 길이(미터). 필요하면 조정.
+SOURCE_CRS = "EPSG:5179"  # Korea central belt TM, the coordinate system of the source shapefiles
+CELL_SIZE_M = 100  # grid cell side length (metres). Adjust if needed.
 
 
 def find_year_shapefiles():
-    """연도 폴더(YYYY년 침수흔적도)를 순회하며 (year, shp_path) 목록을 반환."""
+    """Walks the year folders (YYYY년 침수흔적도) and returns a list of (year, shp_path)."""
     pairs = []
     for entry in sorted(os.listdir(SRC_DIR)):
         m = re.match(r"^(\d{4})년\s*침수흔적도$", entry)
@@ -41,7 +41,7 @@ def find_year_shapefiles():
 
 
 def load_year(year, shp_path):
-    """한 연도 shapefile을 읽어 geometry / F_SHIM / year 만 남긴 GeoDataFrame 반환."""
+    """Reads one year's shapefile and returns a GeoDataFrame with only geometry / F_SHIM / year."""
     gdf = gpd.read_file(shp_path)
     if gdf.crs is None:
         gdf = gdf.set_crs(SOURCE_CRS)
@@ -63,7 +63,7 @@ def load_year(year, shp_path):
         crs=SOURCE_CRS,
     )
 
-    # 유효하지 않은/빈 geometry 정리
+    # clean up invalid/empty geometries
     out = out[~out.geometry.is_empty & out.geometry.notna()].copy()
     invalid = ~out.geometry.is_valid
     if invalid.any():
@@ -78,8 +78,9 @@ def load_year(year, shp_path):
 
 
 def build_grid(bounds, cell_size):
+    """Builds a square grid of cell_size cells covering the bounds, aligned to multiples of the cell size."""
     minx, miny, maxx, maxy = bounds
-    # 격자를 셀 크기에 맞춰 정렬
+    # align the grid to the cell size
     minx = np.floor(minx / cell_size) * cell_size
     miny = np.floor(miny / cell_size) * cell_size
     xs = np.arange(minx, maxx + cell_size, cell_size)
@@ -100,6 +101,7 @@ def build_grid(bounds, cell_size):
 
 
 def main():
+    """Loads every year's flood polygons, joins them to the grid, aggregates per cell and saves data/flood_grid.geojson."""
     os.makedirs(os.path.join(BASE_DIR, "data"), exist_ok=True)
 
     year_shp_pairs = find_year_shapefiles()
@@ -122,12 +124,13 @@ def main():
     print(f"교차 매칭: {len(joined):,}건")
 
     print("\n[4/5] 연도 내 중복(이중 출처) 축약 후 셀별 집계")
-    # 같은 (cell_id, year) 안에서는 최댓값 침수심으로 축약 (2022/2025 이중 출처 대응)
+    # within one (cell_id, year), keep the deepest flood depth (handles the two sources in 2022/2025)
     per_cell_year = (
         joined.groupby(["cell_id", "year"], as_index=False)["depth"].max()
     )
 
     def agg_cell(g):
+        """Summarises one cell: flood years, mean and max depth, frequency and the frequency × depth score."""
         years = sorted(g["year"].tolist())
         depths = g.set_index("year")["depth"]
         avg_depth = float(depths.mean(skipna=True)) if depths.notna().any() else None
