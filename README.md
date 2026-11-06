@@ -12,13 +12,31 @@ In the 1970s, amid military tension with North Korea, many residential buildings
 
 Their structure makes poor living conditions common: little sunlight, damp walls that grow mold, and a high risk of flooding during heavy rain. These problems are hard to notice during a short visit before signing a lease. Room Scanner was built to measure and evaluate them, so that a prospective tenant can see the risks before moving in.
 
-## What it does
+## How it works
 
-| Risk | How the room is evaluated |
-|---|---|
-| **Sunlight** | A camera on a pan-tilt rig captures a panorama, which is turned into a 3D room model. Windows are detected on the walls, and the sun's path is used to estimate how much direct light enters the room. |
-| **Mold** | A surface sensor (IR thermometer + humidity sensor) scans the walls. Combined with outdoor weather data, it estimates where condensation and mold growth are likely. |
-| **Flood** | A model trained on Seoul's flood records and rainfall data estimates the flood risk of the room's location. |
+### Sun Calculator
+
+1. **Scan the room.** A pan-tilt rig takes about 21 photos in three tilt rows. They are projected into an equirectangular panorama using the motor angles, while a BNO055 compass records north.
+2. **Rebuild the room in 3D.** HorizonNet predicts the wall boundaries and corners. False corners are filtered out, and the camera height scales the layout into a metric 3D model.
+3. **Find the windows.** OneFormer (ADE20K) segments a face-on texture of each wall. Each "windowpane" blob's bounding box is cut out of the wall mesh as an opening.
+4. **Locate the sun.** Solar altitude and azimuth come from Spencer's (1971) Fourier series, rotated by the room's north heading into model coordinates.
+5. **Trace the sunlight.** Rays are cast from every mesh vertex toward the sun (Möller–Trumbore). Unblocked vertices are sunlit, with irradiance = clear-sky DNI × cos(incidence angle).
+
+### Mold Simulator
+
+1. **Measure the surfaces.** An MLX90614 infrared thermometer reads surface temperature in the 20 face directions of an imaginary icosahedron, and an SHT41 sensor records air temperature and humidity.
+2. **Map measurements onto the room.** Each point on the 3D model takes the value of the nearest face direction of the north-aligned icosahedron, blended at the seams.
+3. **Simulate surface temperatures over a year.** Past KMA weather stands in for future weather. With a temperature factor `f` fitted from the scan and ground temperature `θg`, a surface follows `θg + f(θi − θg)` during the user's heating or cooling, and `θg` otherwise.
+4. **Estimate surface humidity.** Indoor vapor pressure is the outdoor value plus a scan-fitted moisture excess that grows as outdoor temperature falls. Surface relative humidity uses the saturation pressure at each surface's temperature.
+5. **Predict mold growth.** The VTT model advances a mold index (0–6) hourly from each surface's temperature, humidity, and material, for a central and a worst-case scenario.
+
+### Flood Risk Estimator
+
+1. **Collect the data.** Fourteen years of Seoul's flood trace maps were gridded into 100 m cells and combined with hourly rainfall from 27 Korea Meteorological Administration stations.
+2. **Simplify the rainfall.** Hierarchical clustering on rainfall correlation grouped the stations into five regions. Each year's regional 1-hour and 24-hour maxima were reduced by PCA to three principal components to avoid overfitting.
+3. **Group the neighborhoods.** HDBSCAN grouped the 13,054 cells with flood history into 11 clusters by the rainfall of the years they flooded. Cells that never flooded have no record.
+4. **Train the prediction model.** A Bayesian hierarchical logistic regression (PyMC) learns how likely each cluster is to flood, given a year's rainfall components. Leave-one-year-out cross-validation chose the setup.
+5. **Calculate local risk.** Each cell's flood odds equal its cluster's odds multiplied by a cell-specific factor from its flood history, evaluated over 500 posterior samples. The map updates as you adjust the rainfall sliders.
 
 ## Quick start
 

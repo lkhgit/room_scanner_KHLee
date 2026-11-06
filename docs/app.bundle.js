@@ -286,25 +286,25 @@ const SEASON = { "03": "Spring equinox", "06": "Summer solstice", "09": "Autumn 
 const TABS = [["sun", "Sunlight"], ["mold", "Mold"], ["flood", "Flood risk"], ["how", "How it works"]];
 const HOW = [
   { title: "Sun Calculator", steps: [
-    ["Scan the room.", "A pan-tilt rig photographs the room at known motor angles and stitches the shots into a 360° panorama, while a compass sensor records which way is north."],
-    ["Rebuild the room in 3D.", "HorizonNet reads the panorama and estimates the room’s layout (floor, ceiling, and walls) to create a 3D model."],
-    ["Find the windows.", "The panorama is projected onto each wall, and a segmentation model(OneFormer) detects windows and fits a rectangle around each one."],
-    ["Locate the sun.", "For the chosen date, time, and location, the sun’s altitude and azimuth are calculated and aligned with the room’s north direction."],
-    ["Trace the sunlight.", "Rays from the sun are cast through each window rectangle to show which parts of the floor and walls receive direct sunlight."],
+    ["Scan the room.", "A pan-tilt rig takes about 21 photos in three tilt rows. They are projected into an equirectangular panorama using the motor angles, while a BNO055 compass records north."],
+    ["Rebuild the room in 3D.", "HorizonNet predicts the wall boundaries and corners. False corners are filtered out, and the camera height scales the layout into a metric 3D model."],
+    ["Find the windows.", "OneFormer (ADE20K) segments a face-on texture of each wall. Each \"windowpane\" blob’s bounding box is cut out of the wall mesh as an opening."],
+    ["Locate the sun.", "Solar altitude and azimuth come from Spencer’s (1971) Fourier series, rotated by the room’s north heading into model coordinates."],
+    ["Trace the sunlight.", "Rays are cast from every mesh vertex toward the sun (Möller–Trumbore). Unblocked vertices are sunlit, with irradiance = clear-sky DNI × cos(incidence angle)."],
   ] },
   { title: "Mold Simulator", steps: [
-    ["Measure the surfaces.", "An infrared thermometer on the rig measures surface temperature in the 20 face directions of an imaginary icosahedron, and a humidity sensor records the air’s temperature and moisture."],
-    ["Map measurements onto the room.", "The 3D room model is projected onto the north-aligned icosahedron so that every wall area is matched to a measured surface temperature."],
-    ["Simulate surface temperatures over a year.", "Past weather data stands in for future weather, ground temperature serves as the outside boundary, and the user’s heating and cooling schedule is applied to predict how each surface’s temperature changes."],
-    ["Estimate surface humidity.", "Indoor moisture is estimated from outdoor temperature (scaled by the scan measurements), and each surface’s relative humidity is calculated from its own temperature."],
-    ["Predict mold growth.", "The VTT mold model uses each surface’s temperature and humidity history to estimate where and how quickly mold is likely to grow."],
+    ["Measure the surfaces.", "An MLX90614 infrared thermometer reads surface temperature in the 20 face directions of an imaginary icosahedron, and an SHT41 sensor records air temperature and humidity."],
+    ["Map measurements onto the room.", "Each point on the 3D model takes the value of the nearest face direction of the north-aligned icosahedron, blended at the seams."],
+    ["Simulate surface temperatures over a year.", "Past KMA weather stands in for future weather. With a temperature factor <code>f</code> fitted from the scan and ground temperature <code>θg</code>, a surface follows <code>θg + f(θi − θg)</code> during the user’s heating or cooling, and <code>θg</code> otherwise."],
+    ["Estimate surface humidity.", "Indoor vapor pressure is the outdoor value plus a scan-fitted moisture excess that grows as outdoor temperature falls. Surface relative humidity uses the saturation pressure at each surface’s temperature."],
+    ["Predict mold growth.", "The VTT model advances a mold index (0–6) hourly from each surface’s temperature, humidity, and material, for a central and a worst-case scenario."],
   ] },
   { title: "Flood Risk Estimator", steps: [
-    ["Collect the data.", "fourteen years of Seoul’s flood damage records were combined with rainfall data from 27 Korea Meteorological Administration stations."],
-    ["Simplify the rainfall.", "Stations with similar rainfall patterns were grouped into five regions using hierarchical clustering, and each year’s rainfall was reduced to a three principal components using PCA dimension reduction to avoid overfitting."],
-    ["Group the neighborhoods.", "Areas with flood history were grouped into clusters using HDBSCAN, while areas that have never flooded are marked as safe."],
-    ["Train the prediction model.", "A hierarchical logistic regression learns how likely each cluster is to flood, given a year’s rainfall components."],
-    ["Calculate local risk.", "Each grid cell’s flood probability equals its cluster’s probability multiplied by a cell-specific factor, and the results are drawn on a map that changes as you adjust the rainfall sliders."],
+    ["Collect the data.", "Fourteen years of Seoul’s flood trace maps were gridded into 100 m cells and combined with hourly rainfall from 27 Korea Meteorological Administration stations."],
+    ["Simplify the rainfall.", "Hierarchical clustering on rainfall correlation grouped the stations into five regions. Each year’s regional 1-hour and 24-hour maxima were reduced by PCA to three principal components to avoid overfitting."],
+    ["Group the neighborhoods.", "HDBSCAN grouped the 13,054 cells with flood history into 11 clusters by the rainfall of the years they flooded. Cells that never flooded have no record."],
+    ["Train the prediction model.", "A Bayesian hierarchical logistic regression (PyMC) learns how likely each cluster is to flood, given a year’s rainfall components. Leave-one-year-out cross-validation chose the setup."],
+    ["Calculate local risk.", "Each cell’s flood odds equal its cluster’s odds multiplied by a cell-specific factor from its flood history, evaluated over 500 posterior samples. The map updates as you adjust the rainfall sliders."],
   ] },
 ];
 
